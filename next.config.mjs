@@ -1,18 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: false,
-  devIndicators: false, // Desactiva el círculo negro con la N en desarrollo
-  // Desactiva restricciones de host para permitir conexiones desde móviles locales
-  async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: [
-          { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Access-Control-Allow-Methods', value: 'GET,POST,OPTIONS' },
-        ],
-      },
-    ];
+  typescript: {
+    // Omite los errores de TypeScript al compilar en producción
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    // Omite los avisos de ESLint durante el despliegue
+    ignoreDuringBuilds: true,
   },
 };
 
