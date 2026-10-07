@@ -77,6 +77,33 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
   useEffect(() => {
     fetchCalendarData();
+
+    // CANAL EN TIEMPO REAL: Actualiza la pantalla de ambos usuarios al instante
+    const channel = supabase
+      .channel('calendar-realtime-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'calendar_events' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setEvents((prev) => {
+              if (prev.some((e) => e.id === payload.new.id)) return prev;
+              return [payload.new, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setEvents((prev) =>
+              prev.map((item) => (item.id === payload.new.id ? payload.new : item))
+            );
+          } else if (payload.eventType === 'DELETE') {
+            setEvents((prev) => prev.filter((item) => item.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user.id]);
 
   const toggleExpandCard = (id: string) => {
