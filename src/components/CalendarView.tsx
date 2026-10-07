@@ -76,38 +76,33 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const quickMediaInputRef = useRef<HTMLInputElement | null>(null);
   const [activeUploadTargetId, setActiveUploadTargetId] = useState<string | null>(null);
 
-  // NORMALIZADOR EXACTO DE LA DIRECCIÓN DEL CALENDARIO (LA CLAVE DEL ESPEJO)
-  const extractCalendarId = (url: string) => {
-    if (!url) return '';
+  const cleanKey = (urlStr: string) => {
+    if (!urlStr) return '';
     try {
-      const clean = url.trim().toLowerCase();
-      const match = clean.match(/\/calendar\/ical\/([^/]+)\//);
-      if (match && match[1]) {
-        return decodeURIComponent(match[1]);
-      }
-      return clean.split('?')[0];
+      const match = urlStr.trim().toLowerCase().match(/\/calendar\/ical\/([^/]+)\//);
+      if (match && match[1]) return decodeURIComponent(match[1]);
+      return urlStr.trim().toLowerCase().split('?')[0];
     } catch {
-      return url.trim().toLowerCase();
+      return urlStr.trim().toLowerCase();
     }
   };
 
-  // REFRESCO EN TIEMPO REAL CON ESPEJO DIRECTO
+  // CANAL EN TIEMPO REAL: ESCUCHA GLOBAL
   useEffect(() => {
     fetchCalendarData();
 
-    // CANAL ESPEJO: Al cambiar cualquier evento en la base de datos, se actualiza la pantalla del otro usuario
     const channel = supabase
-      .channel('calendar_mirror_realtime')
+      .channel('schema-db-changes')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'calendar_events' },
         (payload) => {
-          console.log('[Espejo Realtime] Cambio detectado:', payload.eventType);
+          console.log('[Realtime] Notificación recibida:', payload.eventType);
           fetchCalendarData();
         }
       )
       .subscribe((status) => {
-        console.log('[Espejo Realtime] Estado canal:', status);
+        console.log('[Realtime] Estado de suscripción:', status);
       });
 
     return () => {
@@ -122,7 +117,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }));
   };
 
-  // PARSER DE GOOGLE CALENDAR VINCULADO AL ESPEJO
   const parseICS = (icsData: string, calendarName: string, calKey: string) => {
     const parsed: any[] = [];
     const cleanIcs = icsData.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '');
@@ -184,53 +178,34 @@ export default function CalendarView({ user }: CalendarViewProps) {
   };
 
   const fetchCalendarData = async () => {
-    setIsLoading(true);
     try {
-      // 1. Obtener todos los calendarios vinculados en el sistema
-      const [resExt, resCats, resCrm] = await Promise.all([
+      // 1. Cargar TODAS las fuentes sin filtrar por usuario
+      const [resExt, resCats, resCrm, resEvents] = await Promise.all([
         supabase.from('external_calendars').select('*'),
         supabase.from('calendar_categories').select('*').order('name', { ascending: true }),
-        supabase.from('clients').select('*').order('name', { ascending: true })
+        supabase.from('clients').select('*').order('name', { ascending: true }),
+        supabase.from('calendar_events').select('*').order('created_at', { ascending: false })
       ]);
 
       if (resCats.data) setCategoryList(resCats.data);
       if (resExt.data) setExternalCalendars(resExt.data);
       if (resCrm.data) setCrmClients(resCrm.data);
 
-      const allActiveMirrorKeys = (resExt.data || []).map((c) => extractCalendarId(c.url)).filter(Boolean);
+      let currentEvents = resEvents.data || [];
+      const existingGoogleUids = new Set(currentEvents.map((e) => e.google_uid).filter(Boolean));
 
-      // 2. Traer todos los eventos compartidos sin filtrar por user_id
-      const { data: allDbEvents, error: evErr } = await supabase
-        .from('calendar_events')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (evErr) console.error('Error cargando eventos:', evErr);
-
-      // FILTRO ESPEJO: Si comparten la misma dirección de Google Calendar, ven exactamente los mismos eventos
-      let mirrorEvents = (allDbEvents || []).filter((item) => {
-        if (allActiveMirrorKeys.length === 0) return true;
-        if (item.calendar_key) {
-          const itemKey = extractCalendarId(item.calendar_key);
-          if (allActiveMirrorKeys.includes(itemKey)) return true;
-        }
-        return true;
-      });
-
-      const existingGoogleUids = new Set(mirrorEvents.map((e) => e.google_uid).filter(Boolean));
-
-      // 3. Sincronización automática de Google Calendar al espejo
+      // 2. Sincronizar calendarios de Google enlazados
       if (resExt.data && resExt.data.length > 0) {
         for (const cal of resExt.data) {
           try {
             const rawUrl = cal.url.trim();
-            const mirrorKey = extractCalendarId(rawUrl);
+            const calSharedKey = cleanKey(rawUrl);
 
             const res = await fetch(`/api/calendar-sync?url=${encodeURIComponent(rawUrl)}`);
             if (res.ok) {
               const icsText = await res.text();
               if (icsText && icsText.includes('BEGIN:VCALENDAR')) {
-                const parsedIcsEvents = parseICS(icsText, cal.name, mirrorKey);
+                const parsedIcsEvents = parseICS(icsText, cal.name, calSharedKey);
 
                 const toInsert = parsedIcsEvents
                   .filter((p) => !existingGoogleUids.has(p.google_uid))
@@ -244,7 +219,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     time: p.time || 'Flexible',
                     category: cal.name,
                     google_uid: p.google_uid,
-                    calendar_key: mirrorKey, // CLAVE DEL ESPEJO
+                    calendar_key: calSharedKey,
                     attachments: [],
                     voice_notes: [],
                     is_visada: false,
@@ -258,27 +233,26 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     .select();
 
                   if (insertedData) {
-                    mirrorEvents = [...insertedData, ...mirrorEvents];
+                    currentEvents = [...insertedData, ...currentEvents];
                     toInsert.forEach((item) => existingGoogleUids.add(item.google_uid));
                   }
                 }
               }
             }
           } catch (e) {
-            console.warn(`Error sincronizando espejo: ${cal.name}`);
+            console.warn(`Error en sync de ${cal.name}`);
           }
         }
       }
 
-      setEvents(mirrorEvents);
+      setEvents(currentEvents);
     } catch (err) {
-      console.error(err);
+      console.error('Error al sincronizar agenda compartida:', err);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // NAVEGACIÓN MENSUAL
   const nextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
   const prevMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
 
@@ -303,7 +277,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         return ev.date === dateStr && matchCategory && !ev.is_visada;
       });
       const hasEvents = dayEvents.length > 0;
-      const isMirrorShared = dayEvents.some((ev) => !!ev.calendar_key || !!ev.google_uid);
+      const isGoogleShared = dayEvents.some((ev) => !!ev.calendar_key || !!ev.google_uid);
 
       days.push(
         <button
@@ -320,7 +294,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
           <span className="text-xs leading-none">{d}</span>
           {hasEvents && (
             <div className="flex gap-0.5 justify-center items-center">
-              <span className={`w-2 h-2 rounded-full ${isMirrorShared ? 'bg-amber-500' : 'bg-indigo-600'}`} />
+              <span className={`w-2 h-2 rounded-full ${isGoogleShared ? 'bg-amber-500' : 'bg-indigo-600'}`} />
               {dayEvents.length > 1 && <span className="text-[8px] font-bold text-slate-400">+{dayEvents.length}</span>}
             </div>
           )}
@@ -331,7 +305,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     return days;
   };
 
-  // VISADO EN TIEMPO REAL (SE TRANSMITE AL INSTANTE A LA OTRA CUENTA)
   const handleToggleVisada = async (ev: any) => {
     const newState = !ev.is_visada;
     try {
@@ -340,7 +313,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     } catch (err) {}
   };
 
-  // SUBIDA MULTIMEDIA (CÁMARA O GALERÍA)
   const triggerQuickMediaUpload = (eventId: string) => {
     setActiveUploadTargetId(eventId);
     quickMediaInputRef.current?.click();
@@ -406,7 +378,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         }
       }
     } catch (err: any) {
-      alert('Error al borrar archivo: ' + err.message);
+      alert('Error al borrar: ' + err.message);
     }
   };
 
@@ -429,7 +401,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         }
       }
     } catch (err: any) {
-      alert('Error al borrar nota de voz: ' + err.message);
+      alert('Error al borrar audio: ' + err.message);
     }
   };
 
@@ -497,7 +469,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       setIsRecording(true);
       timerIntervalRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
     } catch (err) {
-      alert('Activa los permisos del micrófono para grabar.');
+      alert('Activa los permisos del micrófono.');
     }
   };
 
@@ -561,11 +533,10 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Asignación de la clave del espejo
     const matchedExtCal = externalCalendars.find((c) => c.name === eventForm.category);
     const resolvedMirrorKey = matchedExtCal 
-      ? extractCalendarId(matchedExtCal.url) 
-      : (eventForm.calendar_key || (externalCalendars[0] ? extractCalendarId(externalCalendars[0].url) : ''));
+      ? cleanKey(matchedExtCal.url) 
+      : (eventForm.calendar_key || (externalCalendars[0] ? cleanKey(externalCalendars[0].url) : ''));
 
     const payload = {
       title: eventForm.title,
@@ -576,7 +547,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       date: isSinFecha ? null : eventForm.date,
       time: isSinFecha ? 'Flexible' : eventForm.time,
       category: eventForm.category,
-      calendar_key: resolvedMirrorKey, // SE COMPARTE EN EL ESPEJO
+      calendar_key: resolvedMirrorKey,
       attachments: eventForm.attachments,
       voice_notes: eventForm.voice_notes,
       is_visada: false,
@@ -735,7 +706,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }
   };
 
-  // ENLACE AL ESPEJO POR URL DE GOOGLE CALENDAR
   const handleAddExternalCalendar = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanUrl = newCalUrl.trim();
@@ -1208,7 +1178,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                       placeholder="Nombre completo *"
                       value={quickCrm.name}
                       onChange={(e) => setQuickCrm({ ...quickCrm, name: e.target.value })}
-                      className="w-full p-2 rounded-lg border border-slate-300 bg-white"
+                      className="w-full p-2.5 rounded-lg border border-slate-300 bg-white"
                     />
                     <div className="grid grid-cols-2 gap-2">
                       <input
