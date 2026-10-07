@@ -96,30 +96,39 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }
   };
 
-  // 🔴🟢 CONEXIÓN EN TIEMPO REAL CON CHIVATO VISUAL
-  useEffect(() => {
-    fetchCalendarData();
-
-    const channel = supabase
-      .channel('espejo_global_r1plus')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'calendar_events' },
-        (payload) => {
-          console.log('[Espejo Sync] Cambio detectado:', payload.eventType);
-          fetchCalendarData(); // Recarga automática
+  // 🔴🟢 ESCUCHA DE CANAL GLOBAL QUIRÚRGICA (Sin duplicados)
+    const channel = supabase.channel('agenda_espejo_live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_events' }, (payload) => {
+        console.log('⚡ Sincronización entrante:', payload.eventType);
+        
+        if (payload.eventType === 'INSERT') {
+          // Inyecta el nuevo evento solo si no existe ya en nuestra pantalla
+          setEvents(prev => {
+            if (prev.some(ev => ev.id === payload.new.id)) return prev;
+            if (payload.new.google_uid && prev.some(ev => ev.google_uid === payload.new.google_uid)) return prev;
+            return [payload.new, ...prev];
+          });
+        } 
+        else if (payload.eventType === 'UPDATE') {
+          // Actualiza solo los datos de la tarjeta que ha cambiado
+          setEvents(prev => prev.map(ev => ev.id === payload.new.id ? { ...ev, ...payload.new } : ev));
+        } 
+        else if (payload.eventType === 'DELETE') {
+          // Borra la tarjeta si el otro usuario la elimina
+          setEvents(prev => prev.filter(ev => ev.id !== payload.old.id));
         }
-      )
+      })
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') setSyncStatus('🟢 Espejo Sincronizado');
+        if (status === 'SUBSCRIBED') setSyncStatus('🟢 Espejo Vinculado');
         else if (status === 'CLOSED') setSyncStatus('🔴 Desconectado');
         else if (status === 'CHANNEL_ERROR') setSyncStatus('⚠️ Error de Red');
       });
 
     return () => {
+      isMounted = false;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [user.id]);
 
   const toggleExpandCard = (id: string) => {
     setExpandedCardIds((prev) => ({
