@@ -76,37 +76,38 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const quickMediaInputRef = useRef<HTMLInputElement | null>(null);
   const [activeUploadTargetId, setActiveUploadTargetId] = useState<string | null>(null);
 
-  // Limpieza estricta de la URL del calendario para usar como ID único compartido
+  // NORMALIZADOR EXACTO DE LA DIRECCIÓN DEL CALENDARIO (LA CLAVE DEL ESPEJO)
   const extractCalendarId = (url: string) => {
     if (!url) return '';
     try {
-      const trimmed = url.trim().toLowerCase();
-      const match = trimmed.match(/\/calendar\/ical\/([^/]+)\//);
+      const clean = url.trim().toLowerCase();
+      const match = clean.match(/\/calendar\/ical\/([^/]+)\//);
       if (match && match[1]) {
         return decodeURIComponent(match[1]);
       }
-      return trimmed.split('?')[0];
+      return clean.split('?')[0];
     } catch {
       return url.trim().toLowerCase();
     }
   };
 
+  // REFRESCO EN TIEMPO REAL CON ESPEJO DIRECTO
   useEffect(() => {
     fetchCalendarData();
 
-    // SUSCRIPCIÓN EN TIEMPO REAL GLOBAL: Cualquier cambio se refleja de inmediato en ambas cuentas
+    // CANAL ESPEJO: Al cambiar cualquier evento en la base de datos, se actualiza la pantalla del otro usuario
     const channel = supabase
-      .channel('universal_calendar_sync')
+      .channel('calendar_mirror_realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'calendar_events' },
         (payload) => {
-          console.log('Cambio detectado en tiempo real:', payload);
+          console.log('[Espejo Realtime] Cambio detectado:', payload.eventType);
           fetchCalendarData();
         }
       )
       .subscribe((status) => {
-        console.log('Estado de la suscripción Realtime:', status);
+        console.log('[Espejo Realtime] Estado canal:', status);
       });
 
     return () => {
@@ -121,6 +122,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }));
   };
 
+  // PARSER DE GOOGLE CALENDAR VINCULADO AL ESPEJO
   const parseICS = (icsData: string, calendarName: string, calKey: string) => {
     const parsed: any[] = [];
     const cleanIcs = icsData.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '');
@@ -184,6 +186,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const fetchCalendarData = async () => {
     setIsLoading(true);
     try {
+      // 1. Obtener todos los calendarios vinculados en el sistema
       const [resExt, resCats, resCrm] = await Promise.all([
         supabase.from('external_calendars').select('*'),
         supabase.from('calendar_categories').select('*').order('name', { ascending: true }),
@@ -194,37 +197,40 @@ export default function CalendarView({ user }: CalendarViewProps) {
       if (resExt.data) setExternalCalendars(resExt.data);
       if (resCrm.data) setCrmClients(resCrm.data);
 
-      const allActiveKeys = (resExt.data || []).map((c) => extractCalendarId(c.url)).filter(Boolean);
+      const allActiveMirrorKeys = (resExt.data || []).map((c) => extractCalendarId(c.url)).filter(Boolean);
 
-      const { data: allEventsData, error: evErr } = await supabase
+      // 2. Traer todos los eventos compartidos sin filtrar por user_id
+      const { data: allDbEvents, error: evErr } = await supabase
         .from('calendar_events')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (evErr) console.error(evErr);
+      if (evErr) console.error('Error cargando eventos:', evErr);
 
-      let currentEvents = (allEventsData || []).filter((item) => {
-        if (allActiveKeys.length === 0) return true;
+      // FILTRO ESPEJO: Si comparten la misma dirección de Google Calendar, ven exactamente los mismos eventos
+      let mirrorEvents = (allDbEvents || []).filter((item) => {
+        if (allActiveMirrorKeys.length === 0) return true;
         if (item.calendar_key) {
           const itemKey = extractCalendarId(item.calendar_key);
-          if (allActiveKeys.includes(itemKey)) return true;
+          if (allActiveMirrorKeys.includes(itemKey)) return true;
         }
         return true;
       });
 
-      const existingGoogleUids = new Set(currentEvents.map((e) => e.google_uid).filter(Boolean));
+      const existingGoogleUids = new Set(mirrorEvents.map((e) => e.google_uid).filter(Boolean));
 
+      // 3. Sincronización automática de Google Calendar al espejo
       if (resExt.data && resExt.data.length > 0) {
         for (const cal of resExt.data) {
           try {
             const rawUrl = cal.url.trim();
-            const calSharedId = extractCalendarId(rawUrl);
+            const mirrorKey = extractCalendarId(rawUrl);
 
             const res = await fetch(`/api/calendar-sync?url=${encodeURIComponent(rawUrl)}`);
             if (res.ok) {
               const icsText = await res.text();
               if (icsText && icsText.includes('BEGIN:VCALENDAR')) {
-                const parsedIcsEvents = parseICS(icsText, cal.name, calSharedId);
+                const parsedIcsEvents = parseICS(icsText, cal.name, mirrorKey);
 
                 const toInsert = parsedIcsEvents
                   .filter((p) => !existingGoogleUids.has(p.google_uid))
@@ -238,7 +244,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     time: p.time || 'Flexible',
                     category: cal.name,
                     google_uid: p.google_uid,
-                    calendar_key: calSharedId,
+                    calendar_key: mirrorKey, // CLAVE DEL ESPEJO
                     attachments: [],
                     voice_notes: [],
                     is_visada: false,
@@ -252,19 +258,19 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     .select();
 
                   if (insertedData) {
-                    currentEvents = [...insertedData, ...currentEvents];
+                    mirrorEvents = [...insertedData, ...mirrorEvents];
                     toInsert.forEach((item) => existingGoogleUids.add(item.google_uid));
                   }
                 }
               }
             }
           } catch (e) {
-            console.warn(`Error de sync: ${cal.name}`);
+            console.warn(`Error sincronizando espejo: ${cal.name}`);
           }
         }
       }
 
-      setEvents(currentEvents);
+      setEvents(mirrorEvents);
     } catch (err) {
       console.error(err);
     } finally {
@@ -272,6 +278,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }
   };
 
+  // NAVEGACIÓN MENSUAL
   const nextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
   const prevMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
 
@@ -296,7 +303,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         return ev.date === dateStr && matchCategory && !ev.is_visada;
       });
       const hasEvents = dayEvents.length > 0;
-      const isSharedGoogle = dayEvents.some((ev) => !!ev.calendar_key || !!ev.google_uid);
+      const isMirrorShared = dayEvents.some((ev) => !!ev.calendar_key || !!ev.google_uid);
 
       days.push(
         <button
@@ -313,7 +320,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
           <span className="text-xs leading-none">{d}</span>
           {hasEvents && (
             <div className="flex gap-0.5 justify-center items-center">
-              <span className={`w-2 h-2 rounded-full ${isSharedGoogle ? 'bg-amber-500' : 'bg-indigo-600'}`} />
+              <span className={`w-2 h-2 rounded-full ${isMirrorShared ? 'bg-amber-500' : 'bg-indigo-600'}`} />
               {dayEvents.length > 1 && <span className="text-[8px] font-bold text-slate-400">+{dayEvents.length}</span>}
             </div>
           )}
@@ -324,6 +331,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
     return days;
   };
 
+  // VISADO EN TIEMPO REAL (SE TRANSMITE AL INSTANTE A LA OTRA CUENTA)
   const handleToggleVisada = async (ev: any) => {
     const newState = !ev.is_visada;
     try {
@@ -332,6 +340,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
     } catch (err) {}
   };
 
+  // SUBIDA MULTIMEDIA (CÁMARA O GALERÍA)
   const triggerQuickMediaUpload = (eventId: string) => {
     setActiveUploadTargetId(eventId);
     quickMediaInputRef.current?.click();
@@ -552,8 +561,9 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Asignación de la clave del espejo
     const matchedExtCal = externalCalendars.find((c) => c.name === eventForm.category);
-    const resolvedCalKey = matchedExtCal 
+    const resolvedMirrorKey = matchedExtCal 
       ? extractCalendarId(matchedExtCal.url) 
       : (eventForm.calendar_key || (externalCalendars[0] ? extractCalendarId(externalCalendars[0].url) : ''));
 
@@ -566,7 +576,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       date: isSinFecha ? null : eventForm.date,
       time: isSinFecha ? 'Flexible' : eventForm.time,
       category: eventForm.category,
-      calendar_key: resolvedCalKey,
+      calendar_key: resolvedMirrorKey, // SE COMPARTE EN EL ESPEJO
       attachments: eventForm.attachments,
       voice_notes: eventForm.voice_notes,
       is_visada: false,
@@ -586,7 +596,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       setShowEventModal(false);
       resetEventForm();
     } catch (err: any) {
-      alert('Error guardando la cita: ' + err.message);
+      alert('Error guardando en el espejo: ' + err.message);
     }
   };
 
@@ -725,6 +735,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }
   };
 
+  // ENLACE AL ESPEJO POR URL DE GOOGLE CALENDAR
   const handleAddExternalCalendar = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanUrl = newCalUrl.trim();
@@ -733,7 +744,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
     try {
       const payload = {
         user_id: String(user.id),
-        name: newCalName || 'Google Calendar',
+        name: newCalName || 'Google Calendar Espejo',
         url: cleanUrl
       };
 
@@ -750,7 +761,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       setNewCalUrl('');
       setShowExternalCalModal(false);
       fetchCalendarData();
-      alert('¡Google Calendar vinculado! Ambas cuentas con este enlace verán las mismas citas al instante.');
+      alert('¡Cuenta vinculada al espejo con éxito!');
     } catch (err: any) {
       alert('Error guardando enlace: ' + err.message);
     }
@@ -799,7 +810,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       {/* CABECERA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 border-b border-slate-100 pb-3">
         <div>
-          <h2 className="text-xl font-black text-slate-800">📅 Agenda Compartida</h2>
+          <h2 className="text-xl font-black text-slate-800">📅 Agenda Espejo en Tiempo Real</h2>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -808,7 +819,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
             onChange={(e) => setActiveCategory(e.target.value)}
             className="bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold rounded-xl py-2 px-3 focus:outline-none focus:border-indigo-500 shadow-sm cursor-pointer"
           >
-            <option value="todos">🌐 Ver Todo</option>
+            <option value="todos">🌐 Ver Todo el Espejo</option>
             {categoryList.length > 0 && (
               <optgroup label="Tus Responsables">
                 {categoryList.map((cat) => (
@@ -819,7 +830,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
               </optgroup>
             )}
             {externalCalendars.length > 0 && (
-              <optgroup label="Google Calendars Compartidos">
+              <optgroup label="Google Calendars Espejo">
                 {externalCalendars.map((cal) => (
                   <option key={cal.id} value={cal.name}>
                     🗓️ {cal.name}
@@ -880,7 +891,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       {/* ENCABEZADO DE AVISOS */}
       <div className="py-3 flex items-center justify-between shrink-0">
         <span className="text-xs font-black text-indigo-700 uppercase tracking-wider">
-          📋 Avisos y citas sincronizadas ({pendientes.length} pendientes)
+          📋 Avisos espejados ({pendientes.length} pendientes)
         </span>
         <span className="text-[10px] font-bold text-slate-400">
           (Sin fecha primero)
@@ -890,10 +901,10 @@ export default function CalendarView({ user }: CalendarViewProps) {
       {/* LISTADO DE CITAS Y NOTAS */}
       <div className="space-y-3 pb-8">
         {isLoading ? (
-          <div className="text-center py-8 text-slate-400 text-sm font-medium">Sincronizando agenda instantánea...</div>
+          <div className="text-center py-8 text-slate-400 text-sm font-medium">Sincronizando espejo en vivo...</div>
         ) : pendientes.length === 0 && visadas.length === 0 ? (
           <div className="text-center py-10 text-slate-400 font-bold bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-            No hay citas ni notas pendientes. Pulsa "+ Añadir Visita / Nota".
+            No hay citas ni notas en este espejo. Pulsa "+ Añadir Visita / Nota".
           </div>
         ) : (
           <>
@@ -936,7 +947,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                         )}
                         {isShared && (
                           <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
-                            🔗 Compartido en tiempo real
+                            🔗 Espejo Activo
                           </span>
                         )}
                       </div>
@@ -951,7 +962,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     </div>
                   </div>
 
-                  {/* BOTONERA DE ACCIÓN */}
+                  {/* BOTONERA DE ACCIÓN INMEDIATA */}
                   <div className="flex items-center gap-1.5 flex-wrap pt-1" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => handleToggleVisada(ev)}
@@ -1132,7 +1143,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
           <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4 my-auto animate-in zoom-in-95">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <h3 className="font-black text-lg text-slate-800">
-                {eventForm.id ? '✏️ Editar Cita' : '📝 Nueva Cita / Nota'}
+                {eventForm.id ? '✏️ Editar Cita del Espejo' : '📝 Nueva Cita en el Espejo'}
               </h3>
               <button onClick={() => setShowEventModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
             </div>
@@ -1525,13 +1536,13 @@ export default function CalendarView({ user }: CalendarViewProps) {
         <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4 animate-in zoom-in-95 text-xs max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <h3 className="font-black text-lg text-slate-800">🗓️ Calendarios de Google</h3>
+              <h3 className="font-black text-lg text-slate-800">🗓️ Calendarios de Google (Espejo)</h3>
               <button onClick={() => setShowExternalCalModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
             </div>
 
             {externalCalendars.length > 0 && (
               <div className="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <span className="font-bold text-slate-700 block">Tus Calendarios Enlazados:</span>
+                <span className="font-bold text-slate-700 block">Calendarios Enlazados al Espejo:</span>
                 {externalCalendars.map((cal) => (
                   <div key={cal.id} className="flex items-center justify-between bg-white p-2.5 rounded-lg border border-slate-200">
                     <div>
@@ -1550,7 +1561,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
             )}
 
             <p className="text-slate-600 font-medium leading-relaxed">
-              Pega aquí la <strong>Dirección secreta en formato iCal (.ics)</strong> de Google Calendar. Cualquier persona o dispositivo con esta misma dirección verá todas las citas, fotos, vídeos y audios sincronizados al instante.
+              Pega aquí la <strong>Dirección secreta en formato iCal (.ics)</strong> de Google Calendar. Todas las cuentas que vinculen esta dirección verán <strong>un espejo exacto</strong> de los eventos, fotos, vídeos, audios y visados en tiempo real.
             </p>
 
             <form onSubmit={handleAddExternalCalendar} className="space-y-3">
@@ -1559,7 +1570,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                 <input
                   type="text"
                   required
-                  placeholder="Ej. Calendario Compartido / Obras"
+                  placeholder="Ej. Obras Empresa o Agenda Común"
                   value={newCalName}
                   onChange={(e) => setNewCalName(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-slate-300 font-bold focus:outline-none focus:border-indigo-500"
@@ -1590,7 +1601,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                   type="submit"
                   className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black shadow-md transition"
                 >
-                  Conectar y Compartir
+                  Conectar al Espejo
                 </button>
               </div>
             </form>
