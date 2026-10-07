@@ -24,6 +24,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const [activeCategory, setActiveCategory] = useState<string>('todos');
   const [isLoading, setIsLoading] = useState(true);
   const [showVisadas, setShowVisadas] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('🔴 Conectando...');
 
   // CONTROL DE TARJETAS EXPANDIDAS
   const [expandedCardIds, setExpandedCardIds] = useState<Record<string, boolean>>({});
@@ -76,33 +77,43 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const quickMediaInputRef = useRef<HTMLInputElement | null>(null);
   const [activeUploadTargetId, setActiveUploadTargetId] = useState<string | null>(null);
 
-  const cleanKey = (urlStr: string) => {
-    if (!urlStr) return '';
+  // EXTRACCIÓN SÚPER ROBUSTA DE LA CLAVE DE GOOGLE (A prueba de espacios y parámetros)
+  const extractCalendarId = (url: string) => {
+    if (!url) return '';
     try {
-      const match = urlStr.trim().toLowerCase().match(/\/calendar\/ical\/([^/]+)\//);
-      if (match && match[1]) return decodeURIComponent(match[1]);
-      return urlStr.trim().toLowerCase().split('?')[0];
+      const clean = url.trim().toLowerCase();
+      if (clean.includes('src=')) {
+        const match = clean.match(/src=([^&]+)/);
+        if (match) return decodeURIComponent(match[1]);
+      }
+      const match = clean.match(/\/calendar\/ical\/([^/]+)\//);
+      if (match && match[1]) {
+        return decodeURIComponent(match[1]);
+      }
+      return clean.split('?')[0];
     } catch {
-      return urlStr.trim().toLowerCase();
+      return url.trim().toLowerCase();
     }
   };
 
-  // CANAL EN TIEMPO REAL: ESCUCHA GLOBAL
+  // 🔴🟢 CONEXIÓN EN TIEMPO REAL CON CHIVATO VISUAL
   useEffect(() => {
     fetchCalendarData();
 
     const channel = supabase
-      .channel('schema-db-changes')
+      .channel('espejo_global_r1plus')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'calendar_events' },
         (payload) => {
-          console.log('[Realtime] Notificación recibida:', payload.eventType);
-          fetchCalendarData();
+          console.log('[Espejo Sync] Cambio detectado:', payload.eventType);
+          fetchCalendarData(); // Recarga automática
         }
       )
       .subscribe((status) => {
-        console.log('[Realtime] Estado de suscripción:', status);
+        if (status === 'SUBSCRIBED') setSyncStatus('🟢 Espejo Sincronizado');
+        else if (status === 'CLOSED') setSyncStatus('🔴 Desconectado');
+        else if (status === 'CHANNEL_ERROR') setSyncStatus('⚠️ Error de Red');
       });
 
     return () => {
@@ -178,34 +189,50 @@ export default function CalendarView({ user }: CalendarViewProps) {
   };
 
   const fetchCalendarData = async () => {
+    setIsLoading(true);
     try {
-      // 1. Cargar TODAS las fuentes sin filtrar por usuario
-      const [resExt, resCats, resCrm, resEvents] = await Promise.all([
+      // 1. Obtener todos los calendarios sin filtros de usuario
+      const [resExt, resCats, resCrm] = await Promise.all([
         supabase.from('external_calendars').select('*'),
         supabase.from('calendar_categories').select('*').order('name', { ascending: true }),
-        supabase.from('clients').select('*').order('name', { ascending: true }),
-        supabase.from('calendar_events').select('*').order('created_at', { ascending: false })
+        supabase.from('clients').select('*').order('name', { ascending: true })
       ]);
 
       if (resCats.data) setCategoryList(resCats.data);
       if (resExt.data) setExternalCalendars(resExt.data);
       if (resCrm.data) setCrmClients(resCrm.data);
 
-      let currentEvents = resEvents.data || [];
-      const existingGoogleUids = new Set(currentEvents.map((e) => e.google_uid).filter(Boolean));
+      const allActiveMirrorKeys = (resExt.data || []).map((c) => extractCalendarId(c.url)).filter(Boolean);
 
-      // 2. Sincronizar calendarios de Google enlazados
+      // 2. Traer todos los eventos compartidos sin filtrar
+      const { data: allDbEvents, error: evErr } = await supabase
+        .from('calendar_events')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (evErr) console.error('Error cargando eventos:', evErr);
+
+      // FILTRO: Muestra los eventos de la cuenta, O los que coincidan con la URL de Google
+      let mirrorEvents = (allDbEvents || []).filter((item) => {
+        if (item.user_id === user.id) return true;
+        if (item.calendar_key && allActiveMirrorKeys.includes(extractCalendarId(item.calendar_key))) return true;
+        return false;
+      });
+
+      const existingGoogleUids = new Set(mirrorEvents.map((e) => e.google_uid).filter(Boolean));
+
+      // 3. Sync de Google Calendar
       if (resExt.data && resExt.data.length > 0) {
         for (const cal of resExt.data) {
           try {
             const rawUrl = cal.url.trim();
-            const calSharedKey = cleanKey(rawUrl);
+            const mirrorKey = extractCalendarId(rawUrl);
 
             const res = await fetch(`/api/calendar-sync?url=${encodeURIComponent(rawUrl)}`);
             if (res.ok) {
               const icsText = await res.text();
               if (icsText && icsText.includes('BEGIN:VCALENDAR')) {
-                const parsedIcsEvents = parseICS(icsText, cal.name, calSharedKey);
+                const parsedIcsEvents = parseICS(icsText, cal.name, mirrorKey);
 
                 const toInsert = parsedIcsEvents
                   .filter((p) => !existingGoogleUids.has(p.google_uid))
@@ -219,7 +246,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     time: p.time || 'Flexible',
                     category: cal.name,
                     google_uid: p.google_uid,
-                    calendar_key: calSharedKey,
+                    calendar_key: mirrorKey,
                     attachments: [],
                     voice_notes: [],
                     is_visada: false,
@@ -233,21 +260,21 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     .select();
 
                   if (insertedData) {
-                    currentEvents = [...insertedData, ...currentEvents];
+                    mirrorEvents = [...insertedData, ...mirrorEvents];
                     toInsert.forEach((item) => existingGoogleUids.add(item.google_uid));
                   }
                 }
               }
             }
           } catch (e) {
-            console.warn(`Error en sync de ${cal.name}`);
+            console.warn(`Error sincronizando espejo: ${cal.name}`);
           }
         }
       }
 
-      setEvents(currentEvents);
+      setEvents(mirrorEvents);
     } catch (err) {
-      console.error('Error al sincronizar agenda compartida:', err);
+      console.error(err);
     } finally {
       setIsLoading(false);
     }
@@ -277,7 +304,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         return ev.date === dateStr && matchCategory && !ev.is_visada;
       });
       const hasEvents = dayEvents.length > 0;
-      const isGoogleShared = dayEvents.some((ev) => !!ev.calendar_key || !!ev.google_uid);
+      const isMirrorShared = dayEvents.some((ev) => !!ev.calendar_key || !!ev.google_uid);
 
       days.push(
         <button
@@ -294,7 +321,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
           <span className="text-xs leading-none">{d}</span>
           {hasEvents && (
             <div className="flex gap-0.5 justify-center items-center">
-              <span className={`w-2 h-2 rounded-full ${isGoogleShared ? 'bg-amber-500' : 'bg-indigo-600'}`} />
+              <span className={`w-2 h-2 rounded-full ${isMirrorShared ? 'bg-amber-500' : 'bg-indigo-600'}`} />
               {dayEvents.length > 1 && <span className="text-[8px] font-bold text-slate-400">+{dayEvents.length}</span>}
             </div>
           )}
@@ -378,7 +405,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         }
       }
     } catch (err: any) {
-      alert('Error al borrar: ' + err.message);
+      alert('Error al borrar archivo: ' + err.message);
     }
   };
 
@@ -401,7 +428,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         }
       }
     } catch (err: any) {
-      alert('Error al borrar audio: ' + err.message);
+      alert('Error al borrar nota de voz: ' + err.message);
     }
   };
 
@@ -535,8 +562,8 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
     const matchedExtCal = externalCalendars.find((c) => c.name === eventForm.category);
     const resolvedMirrorKey = matchedExtCal 
-      ? cleanKey(matchedExtCal.url) 
-      : (eventForm.calendar_key || (externalCalendars[0] ? cleanKey(externalCalendars[0].url) : ''));
+      ? extractCalendarId(matchedExtCal.url) 
+      : (eventForm.calendar_key || (externalCalendars[0] ? extractCalendarId(externalCalendars[0].url) : ''));
 
     const payload = {
       title: eventForm.title,
@@ -767,7 +794,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm h-full flex flex-col overflow-y-auto relative no-scrollbar">
       
-      {/* INPUT MULTIMEDIA NATIVO */}
       <input
         type="file"
         multiple
@@ -780,7 +806,10 @@ export default function CalendarView({ user }: CalendarViewProps) {
       {/* CABECERA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 border-b border-slate-100 pb-3">
         <div>
-          <h2 className="text-xl font-black text-slate-800">📅 Agenda Espejo en Tiempo Real</h2>
+          <h2 className="text-xl font-black text-slate-800">📅 Agenda Compartida</h2>
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full mt-1 inline-block bg-slate-50 border border-slate-200">
+            {syncStatus}
+          </span>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -1178,7 +1207,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                       placeholder="Nombre completo *"
                       value={quickCrm.name}
                       onChange={(e) => setQuickCrm({ ...quickCrm, name: e.target.value })}
-                      className="w-full p-2.5 rounded-lg border border-slate-300 bg-white"
+                      className="w-full p-2 rounded-lg border border-slate-300 bg-white"
                     />
                     <div className="grid grid-cols-2 gap-2">
                       <input
