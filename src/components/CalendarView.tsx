@@ -59,10 +59,9 @@ export default function CalendarView({ user }: CalendarViewProps) {
     voice_notes: []
   });
 
-  // GOOGLE CALENDAR (CON COMPARTICIÓN ENTRE CUENTAS)
+  // GOOGLE CALENDAR (iCal)
   const [newCalName, setNewCalName] = useState('');
   const [newCalUrl, setNewCalUrl] = useState('');
-  const [newCalShareEmail, setNewCalShareEmail] = useState('');
 
   // GRABADORA DE AUDIO RÁPIDA
   const [recordingTargetId, setRecordingTargetId] = useState<string | null>(null);
@@ -78,7 +77,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
   useEffect(() => {
     fetchCalendarData();
-  }, [user.id, user.email]);
+  }, [user.id]);
 
   const toggleExpandCard = (id: string) => {
     setExpandedCardIds((prev) => ({
@@ -87,7 +86,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }));
   };
 
-  const parseICS = (icsData: string, calendarName: string) => {
+  const parseICS = (icsData: string, calendarName: string, calKey: string) => {
     const parsed: any[] = [];
     const cleanIcs = icsData.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '');
     const lines = cleanIcs.split(/\r\n|\n|\r/);
@@ -101,6 +100,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         inEvent = true;
         current = { 
           google_uid: '',
+          calendar_key: calKey,
           category: calendarName, 
           is_visada: false,
           attachments: [], 
@@ -149,57 +149,43 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const fetchCalendarData = async () => {
     setIsLoading(true);
     try {
-      const userIdentifier = user.email || String(user.id);
-
-      // 1. Cargar citas propias y compartidas
-      const [resEvents, resCats, resExt, resCrm] = await Promise.all([
-        supabase
-          .from('calendar_events')
-          .select('*')
-          .or(`user_id.eq.${user.id},shared_users.cs.["${userIdentifier}"]`)
-          .order('created_at', { ascending: false }),
-
-        supabase
-          .from('calendar_categories')
-          .select('*')
-          .eq('user_id', String(user.id))
-          .order('name', { ascending: true }),
-
-        // 2. Cargar calendarios propios O compartidos con este email/id
-        supabase
-          .from('external_calendars')
-          .select('*')
-          .or(`user_id.eq.${user.id},shared_with.cs.["${userIdentifier}"]`),
-
-        supabase
-          .from('clients')
-          .select('*')
-          .order('name', { ascending: true })
+      // 1. Obtener los calendarios enlazados por este usuario
+      const [resExt, resCats, resCrm] = await Promise.all([
+        supabase.from('external_calendars').select('*').eq('user_id', String(user.id)),
+        supabase.from('calendar_categories').select('*').eq('user_id', String(user.id)).order('name', { ascending: true }),
+        supabase.from('clients').select('*').order('name', { ascending: true })
       ]);
 
       if (resCats.data) setCategoryList(resCats.data);
       if (resExt.data) setExternalCalendars(resExt.data);
       if (resCrm.data) setCrmClients(resCrm.data);
 
-      let currentEvents = resEvents.data || [];
+      const myCalendarKeys = (resExt.data || []).map((c) => c.url.trim()).filter(Boolean);
+
+      // 2. Cargar citas propias O que compartan la misma URL (calendar_key)
+      let query = supabase.from('calendar_events').select('*');
+      if (myCalendarKeys.length > 0) {
+        query = query.or(`user_id.eq.${user.id},calendar_key.in.(${myCalendarKeys.map((k) => `"${k}"`).join(',')})`);
+      } else {
+        query = query.eq('user_id', user.id);
+      }
+
+      const { data: dbEvents } = await query.order('created_at', { ascending: false });
+      let currentEvents = dbEvents || [];
       const existingGoogleUids = new Set(currentEvents.map((e) => e.google_uid).filter(Boolean));
 
-      // 3. Descargar y sincronizar calendarios externos (los verán ambos usuarios)
+      // 3. Sincronizar Google Calendar y asociar calendar_key para acceso compartido
       if (resExt.data && resExt.data.length > 0) {
         for (const cal of resExt.data) {
           try {
-            const res = await fetch(`/api/calendar-sync?url=${encodeURIComponent(cal.url)}`);
+            const calUrl = cal.url.trim();
+            const res = await fetch(`/api/calendar-sync?url=${encodeURIComponent(calUrl)}`);
             if (res.ok) {
               const icsText = await res.text();
               if (icsText && icsText.includes('BEGIN:VCALENDAR')) {
-                const parsedIcsEvents = parseICS(icsText, cal.name);
+                const parsedIcsEvents = parseICS(icsText, cal.name, calUrl);
 
-                // Asignar los usuarios que pueden ver este evento (el dueño + los compartidos)
-                const targetSharedUsers = [
-                  cal.user_email || cal.user_id,
-                  ...(cal.shared_with || [])
-                ].filter(Boolean);
-
+                // Insertar solo si nadie con esta calendar_key lo ha insertado antes
                 const toInsert = parsedIcsEvents
                   .filter((p) => !existingGoogleUids.has(p.google_uid))
                   .map((p) => ({
@@ -212,11 +198,11 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     time: p.time || 'Flexible',
                     category: cal.name,
                     google_uid: p.google_uid,
+                    calendar_key: calUrl, // ID COMPARTIDO
                     attachments: [],
                     voice_notes: [],
                     is_visada: false,
-                    user_id: user.id,
-                    shared_users: targetSharedUsers
+                    user_id: user.id
                   }));
 
                 if (toInsert.length > 0) {
@@ -246,6 +232,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }
   };
 
+  // NAVEGACIÓN MENSUAL
   const nextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
   const prevMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
 
@@ -270,7 +257,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         return ev.date === dateStr && matchCategory && !ev.is_visada;
       });
       const hasEvents = dayEvents.length > 0;
-      const isGoogleEvent = dayEvents.some((ev) => !!ev.google_uid);
+      const isSharedGoogle = dayEvents.some((ev) => !!ev.calendar_key || !!ev.google_uid);
 
       days.push(
         <button
@@ -287,7 +274,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
           <span className="text-xs leading-none">{d}</span>
           {hasEvents && (
             <div className="flex gap-0.5 justify-center items-center">
-              <span className={`w-2 h-2 rounded-full ${isGoogleEvent ? 'bg-amber-500' : 'bg-indigo-600'}`} />
+              <span className={`w-2 h-2 rounded-full ${isSharedGoogle ? 'bg-amber-500' : 'bg-indigo-600'}`} />
               {dayEvents.length > 1 && <span className="text-[8px] font-bold text-slate-400">+{dayEvents.length}</span>}
             </div>
           )}
@@ -298,6 +285,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
     return days;
   };
 
+  // MARCAR COMO VISADA (SE ACTUALIZA PARA TODOS LOS USUARIOS)
   const handleToggleVisada = async (ev: any) => {
     const newState = !ev.is_visada;
     try {
@@ -306,6 +294,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
     } catch (err) {}
   };
 
+  // SUBIDA MULTIMEDIA
   const triggerQuickMediaUpload = (eventId: string) => {
     setActiveUploadTargetId(eventId);
     quickMediaInputRef.current?.click();
@@ -345,7 +334,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         }
       }
     } catch (err: any) {
-      alert('Error al subir archivos: ' + err.message);
+      alert('Error al subir: ' + err.message);
     } finally {
       e.target.value = '';
       setActiveUploadTargetId(null);
@@ -353,7 +342,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
   };
 
   const handleDeleteAttachmentDirect = async (eventId: string, attIndex: number) => {
-    if (!confirm('¿Eliminar este archivo?')) return;
+    if (!confirm('¿Eliminar este archivo? Ambos usuarios dejarán de verlo.')) return;
     const targetEv = events.find((item) => item.id === eventId);
     if (!targetEv) return;
 
@@ -371,7 +360,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         }
       }
     } catch (err: any) {
-      alert('Error al borrar el archivo: ' + err.message);
+      alert('Error al borrar archivo: ' + err.message);
     }
   };
 
@@ -462,7 +451,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       setIsRecording(true);
       timerIntervalRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
     } catch (err) {
-      alert('Activa los permisos del micrófono para grabar notas de voz.');
+      alert('Activa los permisos del micrófono para grabar.');
     }
   };
 
@@ -516,6 +505,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       date: ev.date || selectedDate,
       time: ev.time === 'Flexible' ? '10:00' : (ev.time || '10:00'),
       category: ev.category || 'General',
+      calendar_key: ev.calendar_key || '',
       attachments: ev.attachments || [],
       voice_notes: ev.voice_notes || []
     });
@@ -524,6 +514,11 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Determinar la clave compartida si la categoría seleccionada corresponde a un Google Calendar
+    const matchedExtCal = externalCalendars.find((c) => c.name === eventForm.category);
+    const resolvedCalKey = matchedExtCal ? matchedExtCal.url.trim() : (eventForm.calendar_key || '');
+
     const payload = {
       title: eventForm.title,
       description: eventForm.description,
@@ -533,6 +528,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       date: isSinFecha ? null : eventForm.date,
       time: isSinFecha ? 'Flexible' : eventForm.time,
       category: eventForm.category,
+      calendar_key: resolvedCalKey, // AMBOS USUARIOS VERÁN LA CITA
       attachments: eventForm.attachments,
       voice_notes: eventForm.voice_notes,
       is_visada: false,
@@ -587,7 +583,8 @@ export default function CalendarView({ user }: CalendarViewProps) {
       address: '',
       date: selectedDate,
       time: '10:00',
-      category: categoryList[0]?.name || 'General',
+      category: categoryList[0]?.name || (externalCalendars[0]?.name || 'General'),
+      calendar_key: '',
       attachments: [],
       voice_notes: []
     });
@@ -690,23 +687,17 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }
   };
 
-  // ENLAZAR GOOGLE CALENDAR CON COMPARTICIÓN MULTIUSUARIO
+  // ENLAZAR GOOGLE CALENDAR
   const handleAddExternalCalendar = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCalUrl.trim()) return;
+    const cleanUrl = newCalUrl.trim();
+    if (!cleanUrl) return;
 
     try {
-      const sharedList = newCalShareEmail
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
-
       const payload = {
         user_id: String(user.id),
-        user_email: user.email || '',
         name: newCalName || 'Google Calendar',
-        url: newCalUrl.trim(),
-        shared_with: sharedList
+        url: cleanUrl
       };
 
       const { data, error } = await supabase
@@ -720,10 +711,9 @@ export default function CalendarView({ user }: CalendarViewProps) {
       }
       setNewCalName('');
       setNewCalUrl('');
-      setNewCalShareEmail('');
       setShowExternalCalModal(false);
       fetchCalendarData();
-      alert('¡Calendario de Google sincronizado y compartido con éxito!');
+      alert('¡Calendario de Google enlazado! Los eventos asociados a esta dirección son visibles para quienes tengan este mismo enlace.');
     } catch (err: any) {
       alert('Error guardando enlace: ' + err.message);
     }
@@ -792,7 +782,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
               </optgroup>
             )}
             {externalCalendars.length > 0 && (
-              <optgroup label="Google Calendars">
+              <optgroup label="Google Calendars Compartidos">
                 {externalCalendars.map((cal) => (
                   <option key={cal.id} value={cal.name}>
                     🗓️ {cal.name}
@@ -874,7 +864,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
               const cardKey = ev.id || `ev-${idx}`;
               const isExpanded = !!expandedCardIds[cardKey];
               const sinFechaTag = !ev.date;
-              const isGoogleOrigin = !!ev.google_uid;
+              const isShared = !!ev.calendar_key || !!ev.google_uid;
 
               return (
                 <div
@@ -883,7 +873,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                   className={`p-4 bg-white border rounded-2xl shadow-sm space-y-3 transition hover:border-indigo-400 hover:shadow-md cursor-pointer select-none ${
                     sinFechaTag 
                       ? 'border-purple-300 bg-purple-50/20' 
-                      : isGoogleOrigin 
+                      : isShared 
                       ? 'border-amber-300 bg-amber-50/20' 
                       : 'border-slate-200'
                   }`}
@@ -898,14 +888,19 @@ export default function CalendarView({ user }: CalendarViewProps) {
                         ) : (
                           <>
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                              isGoogleOrigin ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+                              isShared ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
                             }`}>
-                              {isGoogleOrigin ? `🗓️ ${ev.category}` : `👤 ${ev.category || 'General'}`}
+                              {isShared ? `🗓️ ${ev.category}` : `👤 ${ev.category || 'General'}`}
                             </span>
                             <span className="text-xs font-mono font-bold text-slate-500">
                               📅 {ev.date} · {ev.time}
                             </span>
                           </>
+                        )}
+                        {isShared && (
+                          <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
+                            🔗 Compartido
+                          </span>
                         )}
                       </div>
                       <h4 className="font-black text-slate-800 text-base mt-1 truncate">{ev.title}</h4>
@@ -1271,7 +1266,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     {categoryList.length === 0 && <option value="General">General</option>}
                   </optgroup>
                   {externalCalendars.length > 0 && (
-                    <optgroup label="Google Calendars Enlazados">
+                    <optgroup label="Google Calendars Compartidos">
                       {externalCalendars.map((cal) => (
                         <option key={cal.id} value={cal.name}>🗓️ {cal.name}</option>
                       ))}
@@ -1488,7 +1483,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         </div>
       )}
 
-      {/* MODAL GESTIONAR GOOGLE CALENDAR CON OPCIÓN COMPARTIR */}
+      {/* MODAL GESTIONAR GOOGLE CALENDAR */}
       {showExternalCalModal && (
         <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4 animate-in zoom-in-95 text-xs max-h-[90vh] overflow-y-auto">
@@ -1499,17 +1494,12 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
             {externalCalendars.length > 0 && (
               <div className="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <span className="font-bold text-slate-700 block">Calendarios Enlazados:</span>
+                <span className="font-bold text-slate-700 block">Tus Calendarios Enlazados:</span>
                 {externalCalendars.map((cal) => (
                   <div key={cal.id} className="flex items-center justify-between bg-white p-2.5 rounded-lg border border-slate-200">
                     <div>
                       <span className="font-bold text-slate-800 block">🗓️ {cal.name}</span>
                       <span className="text-[10px] text-slate-400 truncate block max-w-[200px]">{cal.url}</span>
-                      {cal.shared_with && cal.shared_with.length > 0 && (
-                        <span className="text-[9px] text-indigo-600 font-bold block mt-0.5">
-                          Compartido con: {cal.shared_with.join(', ')}
-                        </span>
-                      )}
                     </div>
                     <button
                       onClick={() => handleDeleteExternalCalendar(cal.id, cal.name)}
@@ -1523,16 +1513,16 @@ export default function CalendarView({ user }: CalendarViewProps) {
             )}
 
             <p className="text-slate-600 font-medium leading-relaxed">
-              Copia la <strong>Dirección secreta en formato iCal (.ics)</strong> desde tu Google Calendar. Puedes compartirlo con otra cuenta indicando su correo.
+              Pega aquí la <strong>Dirección secreta en formato iCal (.ics)</strong> de tu Google Calendar. Si otra persona pega esta misma dirección en su cuenta, ambos compartirán automáticamente todos los eventos, notas, fotos y audios en tiempo real.
             </p>
 
             <form onSubmit={handleAddExternalCalendar} className="space-y-3">
               <div>
-                <label className="block font-bold text-slate-600 mb-1">Nombre del Calendario</label>
+                <label className="block font-bold text-slate-600 mb-1">Nombre para este Calendario</label>
                 <input
                   type="text"
                   required
-                  placeholder="Ej. Obras Empresa o Calendario Común"
+                  placeholder="Ej. Calendario Compartido / Obras"
                   value={newCalName}
                   onChange={(e) => setNewCalName(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-slate-300 font-bold focus:outline-none focus:border-indigo-500"
@@ -1540,7 +1530,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-600 mb-1">URL secreta iCal (.ics)</label>
+                <label className="block font-bold text-slate-600 mb-1">Dirección iCal (.ics) de Google</label>
                 <input
                   type="url"
                   required
@@ -1549,20 +1539,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
                   onChange={(e) => setNewCalUrl(e.target.value)}
                   className="w-full p-2.5 rounded-xl border border-slate-300 font-mono text-[11px] focus:outline-none focus:border-indigo-500"
                 />
-              </div>
-
-              <div>
-                <label className="block font-bold text-indigo-700 mb-1">Compartir con otro usuario (Correo electrónico)</label>
-                <input
-                  type="text"
-                  placeholder="ejemplo@correo.com (o varios separados por comas)"
-                  value={newCalShareEmail}
-                  onChange={(e) => setNewCalShareEmail(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border-2 border-indigo-200 bg-indigo-50/30 font-medium text-xs focus:outline-none focus:border-indigo-500"
-                />
-                <span className="text-[10px] text-slate-400 block mt-1">
-                  Ese usuario verá automáticamente este calendario y sus citas en su propia cuenta.
-                </span>
               </div>
 
               <div className="flex gap-3 pt-3">
