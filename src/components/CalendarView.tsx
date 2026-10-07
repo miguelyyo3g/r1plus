@@ -55,11 +55,12 @@ export default function CalendarView({ user }: CalendarViewProps) {
     date: new Date().toISOString().split('T')[0],
     time: '10:00',
     category: 'General',
+    calendar_key: '',
     attachments: [],
     voice_notes: []
   });
 
-  // GOOGLE CALENDAR (iCal)
+  // GOOGLE CALENDAR
   const [newCalName, setNewCalName] = useState('');
   const [newCalUrl, setNewCalUrl] = useState('');
 
@@ -75,12 +76,18 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const quickMediaInputRef = useRef<HTMLInputElement | null>(null);
   const [activeUploadTargetId, setActiveUploadTargetId] = useState<string | null>(null);
 
+  // NORMALIZADOR DE URL PARA COMPARTICIÓN UNIFORME
+  const cleanKey = (urlStr: string) => {
+    if (!urlStr) return '';
+    return urlStr.trim().toLowerCase().split('?')[0];
+  };
+
   useEffect(() => {
     fetchCalendarData();
 
-    // CANAL EN TIEMPO REAL: Actualiza la pantalla de ambos usuarios al instante
+    // CANAL REALTIME: Cuando el otro usuario cree, edite, suba fotos o vise, la pantalla se actualiza en el acto
     const channel = supabase
-      .channel('calendar-realtime-sync')
+      .channel('shared_calendar_room')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'calendar_events' },
@@ -176,7 +183,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const fetchCalendarData = async () => {
     setIsLoading(true);
     try {
-      // 1. Obtener los calendarios enlazados por este usuario
+      // 1. Cargar calendarios vinculados por el usuario
       const [resExt, resCats, resCrm] = await Promise.all([
         supabase.from('external_calendars').select('*').eq('user_id', String(user.id)),
         supabase.from('calendar_categories').select('*').eq('user_id', String(user.id)).order('name', { ascending: true }),
@@ -187,32 +194,36 @@ export default function CalendarView({ user }: CalendarViewProps) {
       if (resExt.data) setExternalCalendars(resExt.data);
       if (resCrm.data) setCrmClients(resCrm.data);
 
-      const myCalendarKeys = (resExt.data || []).map((c) => c.url.trim()).filter(Boolean);
+      const activeKeys = (resExt.data || []).map((c) => cleanKey(c.url)).filter(Boolean);
 
-      // 2. Cargar citas propias O que compartan la misma URL (calendar_key)
-      let query = supabase.from('calendar_events').select('*');
-      if (myCalendarKeys.length > 0) {
-        query = query.or(`user_id.eq.${user.id},calendar_key.in.(${myCalendarKeys.map((k) => `"${k}"`).join(',')})`);
-      } else {
-        query = query.eq('user_id', user.id);
-      }
+      // 2. Consulta compartida: Carga mis citas O cualquier cita que tenga la misma calendar_key
+      let { data: allEventsData } = await supabase
+        .from('calendar_events')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      const { data: dbEvents } = await query.order('created_at', { ascending: false });
-      let currentEvents = dbEvents || [];
+      // Filtrar en memoria para garantizar que las dos cuentas ven las citas con la misma dirección
+      let currentEvents = (allEventsData || []).filter((item) => {
+        if (item.user_id === user.id) return true;
+        if (item.calendar_key && activeKeys.includes(cleanKey(item.calendar_key))) return true;
+        return false;
+      });
+
       const existingGoogleUids = new Set(currentEvents.map((e) => e.google_uid).filter(Boolean));
 
-      // 3. Sincronizar Google Calendar y asociar calendar_key para acceso compartido
+      // 3. Descargar y sincronizar con Google Calendar
       if (resExt.data && resExt.data.length > 0) {
         for (const cal of resExt.data) {
           try {
-            const calUrl = cal.url.trim();
-            const res = await fetch(`/api/calendar-sync?url=${encodeURIComponent(calUrl)}`);
+            const rawUrl = cal.url.trim();
+            const normalizedKey = cleanKey(rawUrl);
+
+            const res = await fetch(`/api/calendar-sync?url=${encodeURIComponent(rawUrl)}`);
             if (res.ok) {
               const icsText = await res.text();
               if (icsText && icsText.includes('BEGIN:VCALENDAR')) {
-                const parsedIcsEvents = parseICS(icsText, cal.name, calUrl);
+                const parsedIcsEvents = parseICS(icsText, cal.name, normalizedKey);
 
-                // Insertar solo si nadie con esta calendar_key lo ha insertado antes
                 const toInsert = parsedIcsEvents
                   .filter((p) => !existingGoogleUids.has(p.google_uid))
                   .map((p) => ({
@@ -225,7 +236,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     time: p.time || 'Flexible',
                     category: cal.name,
                     google_uid: p.google_uid,
-                    calendar_key: calUrl, // ID COMPARTIDO
+                    calendar_key: normalizedKey, // AMBAS CUENTAS COMPARTEN ESTE ID
                     attachments: [],
                     voice_notes: [],
                     is_visada: false,
@@ -312,7 +323,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     return days;
   };
 
-  // MARCAR COMO VISADA (SE ACTUALIZA PARA TODOS LOS USUARIOS)
   const handleToggleVisada = async (ev: any) => {
     const newState = !ev.is_visada;
     try {
@@ -321,7 +331,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     } catch (err) {}
   };
 
-  // SUBIDA MULTIMEDIA
   const triggerQuickMediaUpload = (eventId: string) => {
     setActiveUploadTargetId(eventId);
     quickMediaInputRef.current?.click();
@@ -542,9 +551,9 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Determinar la clave compartida si la categoría seleccionada corresponde a un Google Calendar
+    // Asociar a la calendar_key si el evento pertenece a un calendario compartido
     const matchedExtCal = externalCalendars.find((c) => c.name === eventForm.category);
-    const resolvedCalKey = matchedExtCal ? matchedExtCal.url.trim() : (eventForm.calendar_key || '');
+    const resolvedCalKey = matchedExtCal ? cleanKey(matchedExtCal.url) : cleanKey(eventForm.calendar_key);
 
     const payload = {
       title: eventForm.title,
@@ -555,7 +564,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       date: isSinFecha ? null : eventForm.date,
       time: isSinFecha ? 'Flexible' : eventForm.time,
       category: eventForm.category,
-      calendar_key: resolvedCalKey, // AMBOS USUARIOS VERÁN LA CITA
+      calendar_key: resolvedCalKey, // AMBOS USUARIOS ACCEDEN POR ESTA CLAVE
       attachments: eventForm.attachments,
       voice_notes: eventForm.voice_notes,
       is_visada: false,
@@ -714,7 +723,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }
   };
 
-  // ENLAZAR GOOGLE CALENDAR
   const handleAddExternalCalendar = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanUrl = newCalUrl.trim();
@@ -740,7 +748,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       setNewCalUrl('');
       setShowExternalCalModal(false);
       fetchCalendarData();
-      alert('¡Calendario de Google enlazado! Los eventos asociados a esta dirección son visibles para quienes tengan este mismo enlace.');
+      alert('¡Calendario vinculado! Ambos usuarios verán los eventos asociados.');
     } catch (err: any) {
       alert('Error guardando enlace: ' + err.message);
     }
