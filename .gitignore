@@ -43,3 +43,9 @@ next-env.d.ts
 *.zip
 node_modules
 .next
+*.zip
+*.tar.gz
+node_modules/
+.next/
+out/
+.env*.local
