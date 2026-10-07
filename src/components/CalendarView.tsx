@@ -81,7 +81,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     if (!url) return '';
     try {
       const trimmed = url.trim().toLowerCase();
-      // Si contiene el patrón de Google Calendar basic.ics
       const match = trimmed.match(/\/calendar\/ical\/([^/]+)\//);
       if (match && match[1]) {
         return decodeURIComponent(match[1]);
@@ -102,26 +101,18 @@ export default function CalendarView({ user }: CalendarViewProps) {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'calendar_events' },
         (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setEvents((prev) => {
-              if (prev.some((e) => e.id === payload.new.id)) return prev;
-              return [payload.new, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            setEvents((prev) =>
-              prev.map((item) => (item.id === payload.new.id ? payload.new : item))
-            );
-          } else if (payload.eventType === 'DELETE') {
-            setEvents((prev) => prev.filter((item) => item.id !== payload.old.id));
-          }
+          console.log('Cambio detectado en tiempo real:', payload);
+          fetchCalendarData();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Estado de la suscripción Realtime:', status);
+      });
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user.id]);
+  }, []);
 
   const toggleExpandCard = (id: string) => {
     setExpandedCardIds((prev) => ({
@@ -193,7 +184,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const fetchCalendarData = async () => {
     setIsLoading(true);
     try {
-      // 1. Cargar todos los calendarios externos registrados en la app
       const [resExt, resCats, resCrm] = await Promise.all([
         supabase.from('external_calendars').select('*'),
         supabase.from('calendar_categories').select('*').order('name', { ascending: true }),
@@ -206,7 +196,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
       const allActiveKeys = (resExt.data || []).map((c) => extractCalendarId(c.url)).filter(Boolean);
 
-      // 2. Traer todos los eventos compartidos o propios
       const { data: allEventsData, error: evErr } = await supabase
         .from('calendar_events')
         .select('*')
@@ -215,16 +204,16 @@ export default function CalendarView({ user }: CalendarViewProps) {
       if (evErr) console.error(evErr);
 
       let currentEvents = (allEventsData || []).filter((item) => {
-        // Si no hay calendarios externos configurados, muestra los del usuario
-        if (allActiveKeys.length === 0) return item.user_id === user.id;
-        // Si tiene clave compartida vinculada a la cuenta de Google, se muestra a todos
-        if (item.calendar_key && allActiveKeys.includes(extractCalendarId(item.calendar_key))) return true;
-        return item.user_id === user.id;
+        if (allActiveKeys.length === 0) return true;
+        if (item.calendar_key) {
+          const itemKey = extractCalendarId(item.calendar_key);
+          if (allActiveKeys.includes(itemKey)) return true;
+        }
+        return true;
       });
 
       const existingGoogleUids = new Set(currentEvents.map((e) => e.google_uid).filter(Boolean));
 
-      // 3. Sincronizar eventos nuevos desde Google Calendar para el calendario activo
       if (resExt.data && resExt.data.length > 0) {
         for (const cal of resExt.data) {
           try {
@@ -237,7 +226,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
               if (icsText && icsText.includes('BEGIN:VCALENDAR')) {
                 const parsedIcsEvents = parseICS(icsText, cal.name, calSharedId);
 
-                // Insertar solo los que falten
                 const toInsert = parsedIcsEvents
                   .filter((p) => !existingGoogleUids.has(p.google_uid))
                   .map((p) => ({
@@ -250,7 +238,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
                     time: p.time || 'Flexible',
                     category: cal.name,
                     google_uid: p.google_uid,
-                    calendar_key: calSharedId, // CLAVE COMPARTIDA
+                    calendar_key: calSharedId,
                     attachments: [],
                     voice_notes: [],
                     is_visada: false,
@@ -284,7 +272,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     }
   };
 
-  // NAVEGACIÓN MENSUAL
   const nextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
   const prevMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
 
@@ -337,7 +324,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     return days;
   };
 
-  // MARCAR COMO VISADA (SE TRANSMITE AL INSTANTE A LA OTRA CUENTA)
   const handleToggleVisada = async (ev: any) => {
     const newState = !ev.is_visada;
     try {
@@ -346,7 +332,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
     } catch (err) {}
   };
 
-  // SUBIDA MULTIMEDIA (CÁMARA O GALERÍA)
   const triggerQuickMediaUpload = (eventId: string) => {
     setActiveUploadTargetId(eventId);
     quickMediaInputRef.current?.click();
@@ -394,7 +379,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
   };
 
   const handleDeleteAttachmentDirect = async (eventId: string, attIndex: number) => {
-    if (!confirm('¿Eliminar este archivo?')) return;
+    if (!confirm('¿Eliminar este archivo? Ambos usuarios dejarán de verlo.')) return;
     const targetEv = events.find((item) => item.id === eventId);
     if (!targetEv) return;
 
@@ -567,7 +552,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Determinar la calendar_key activa: si hay un calendario externo activo, se asigna
     const matchedExtCal = externalCalendars.find((c) => c.name === eventForm.category);
     const resolvedCalKey = matchedExtCal 
       ? extractCalendarId(matchedExtCal.url) 
@@ -582,7 +566,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
       date: isSinFecha ? null : eventForm.date,
       time: isSinFecha ? 'Flexible' : eventForm.time,
       category: eventForm.category,
-      calendar_key: resolvedCalKey, // AMBAS CUENTAS CONECTADAS POR ESTA CLAVE
+      calendar_key: resolvedCalKey,
       attachments: eventForm.attachments,
       voice_notes: eventForm.voice_notes,
       is_visada: false,
@@ -1547,7 +1531,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
             {externalCalendars.length > 0 && (
               <div className="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <span className="font-bold text-slate-700 block">Calendarios Enlazados:</span>
+                <span className="font-bold text-slate-700 block">Tus Calendarios Enlazados:</span>
                 {externalCalendars.map((cal) => (
                   <div key={cal.id} className="flex items-center justify-between bg-white p-2.5 rounded-lg border border-slate-200">
                     <div>
