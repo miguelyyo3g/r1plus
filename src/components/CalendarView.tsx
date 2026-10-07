@@ -26,6 +26,12 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const [showVisadas, setShowVisadas] = useState(false);
   const [syncStatus, setSyncStatus] = useState('🔴 Conectando...');
 
+  // BÚSQUEDA
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // BORRADO SEGURO (3 CLICS)
+  const [deleteClickCount, setDeleteClickCount] = useState<Record<string, number>>({});
+
   // CONTROL DE TARJETAS EXPANDIDAS
   const [expandedCardIds, setExpandedCardIds] = useState<Record<string, boolean>>({});
 
@@ -77,32 +83,112 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const quickMediaInputRef = useRef<HTMLInputElement | null>(null);
   const [activeUploadTargetId, setActiveUploadTargetId] = useState<string | null>(null);
 
-  // EXTRACCIÓN SÚPER ROBUSTA DE LA CLAVE DE GOOGLE (A prueba de espacios y parámetros)
-  const extractCalendarId = (url: string) => {
-    if (!url) return '';
+  // 🧬 NORMALIZADOR ABSOLUTO DE URLS DE GOOGLE
+  const normalizeCalKey = (urlStr: string) => {
+    if (!urlStr) return '';
     try {
-      const clean = url.trim().toLowerCase();
-      if (clean.includes('src=')) {
-        const match = clean.match(/src=([^&]+)/);
-        if (match) return decodeURIComponent(match[1]);
-      }
-      const match = clean.match(/\/calendar\/ical\/([^/]+)\//);
-      if (match && match[1]) {
-        return decodeURIComponent(match[1]);
-      }
-      return clean.split('?')[0];
+      let clean = urlStr.trim().toLowerCase().split('?')[0]; 
+      clean = clean.replace(/^https?:\/\//, ''); 
+      clean = clean.replace('calendar.google.com/calendar/ical/', ''); 
+      return clean; 
     } catch {
-      return url.trim().toLowerCase();
+      return urlStr.trim().toLowerCase();
     }
   };
 
-  // 🔴🟢 ESCUCHA DE CANAL GLOBAL QUIRÚRGICA (Sin duplicados)
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchAgenda = async () => {
+      try {
+        const { data: myCals } = await supabase
+          .from('external_calendars')
+          .select('*')
+          .eq('user_id', String(user.id));
+
+        const mySharedKeys = (myCals || []).map(c => normalizeCalKey(c.url)).filter(Boolean);
+
+        const [resCats, resCrm, resEvents] = await Promise.all([
+          supabase.from('calendar_categories').select('*').eq('user_id', String(user.id)).order('name', { ascending: true }),
+          supabase.from('clients').select('*').order('name', { ascending: true }),
+          supabase.from('calendar_events').select('*').order('created_at', { ascending: false })
+        ]);
+
+        if (!isMounted) return;
+
+        if (resCats.data) setCategoryList(resCats.data);
+        if (resCrm.data) setCrmClients(resCrm.data);
+        if (myCals) setExternalCalendars(myCals);
+
+        let validEvents = (resEvents.data || []).filter(ev => {
+          if (ev.user_id === user.id) return true; 
+          if (ev.calendar_key && mySharedKeys.includes(normalizeCalKey(ev.calendar_key))) return true; 
+          return false;
+        });
+
+        const existingGoogleUids = new Set(validEvents.map(e => e.google_uid).filter(Boolean));
+
+        if (myCals && myCals.length > 0) {
+          for (const cal of myCals) {
+            try {
+              const url = cal.url.trim();
+              const key = normalizeCalKey(url);
+              const res = await fetch(`/api/calendar-sync?url=${encodeURIComponent(url)}`);
+              
+              if (res.ok) {
+                const icsText = await res.text();
+                if (icsText && icsText.includes('BEGIN:VCALENDAR')) {
+                  const parsedIcsEvents = parseICS(icsText, cal.name, key);
+
+                  const toInsert = parsedIcsEvents
+                    .filter(p => !existingGoogleUids.has(p.google_uid))
+                    .map(p => ({
+                      title: p.title || 'Evento Google',
+                      description: p.description || '',
+                      address: p.address || '',
+                      phone: '',
+                      client_name: '',
+                      date: p.date || null,
+                      time: p.time || 'Flexible',
+                      category: cal.name,
+                      google_uid: p.google_uid,
+                      calendar_key: key, 
+                      attachments: [],
+                      voice_notes: [],
+                      is_visada: false,
+                      user_id: user.id
+                    }));
+
+                  if (toInsert.length > 0) {
+                    const { data: insertedData } = await supabase.from('calendar_events').insert(toInsert).select();
+                    if (insertedData) {
+                      validEvents = [...insertedData, ...validEvents];
+                      toInsert.forEach(item => existingGoogleUids.add(item.google_uid));
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn(`Error de sync ICS: ${cal.name}`);
+            }
+          }
+        }
+
+        setEvents(validEvents);
+        setIsLoading(false);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    fetchAgenda();
+
+    // 🔴🟢 ESCUCHA DE CANAL GLOBAL DE BASE DE DATOS QUIRÚRGICA
     const channel = supabase.channel('agenda_espejo_live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_events' }, (payload) => {
         console.log('⚡ Sincronización entrante:', payload.eventType);
         
         if (payload.eventType === 'INSERT') {
-          // Inyecta el nuevo evento solo si no existe ya en nuestra pantalla
           setEvents(prev => {
             if (prev.some(ev => ev.id === payload.new.id)) return prev;
             if (payload.new.google_uid && prev.some(ev => ev.google_uid === payload.new.google_uid)) return prev;
@@ -110,11 +196,9 @@ export default function CalendarView({ user }: CalendarViewProps) {
           });
         } 
         else if (payload.eventType === 'UPDATE') {
-          // Actualiza solo los datos de la tarjeta que ha cambiado
           setEvents(prev => prev.map(ev => ev.id === payload.new.id ? { ...ev, ...payload.new } : ev));
         } 
         else if (payload.eventType === 'DELETE') {
-          // Borra la tarjeta si el otro usuario la elimina
           setEvents(prev => prev.filter(ev => ev.id !== payload.old.id));
         }
       })
@@ -131,10 +215,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
   }, [user.id]);
 
   const toggleExpandCard = (id: string) => {
-    setExpandedCardIds((prev) => ({
-      ...prev,
-      [id]: !prev[id]
-    }));
+    setExpandedCardIds(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
   const parseICS = (icsData: string, calendarName: string, calKey: string) => {
@@ -150,18 +231,11 @@ export default function CalendarView({ user }: CalendarViewProps) {
       if (line === 'BEGIN:VEVENT') {
         inEvent = true;
         current = { 
-          google_uid: '',
-          calendar_key: calKey,
-          category: calendarName, 
-          is_visada: false,
-          attachments: [], 
-          voice_notes: [] 
+          google_uid: '', calendar_key: calKey, category: calendarName, is_visada: false, attachments: [], voice_notes: [] 
         };
       } else if (line === 'END:VEVENT') {
         if (current.title) {
-          if (!current.google_uid) {
-            current.google_uid = `${current.title}_${current.date || ''}_${current.time || ''}`;
-          }
+          if (!current.google_uid) current.google_uid = `${current.title}_${current.date || ''}_${current.time || ''}`;
           parsed.push(current);
         }
         inEvent = false;
@@ -184,9 +258,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
             current.date = `${y}-${m}-${d}`;
             if (valPart.includes('T')) {
               const tIdx = valPart.indexOf('T');
-              const hh = valPart.substring(tIdx + 1, tIdx + 3);
-              const mm = valPart.substring(tIdx + 3, tIdx + 5);
-              current.time = `${hh}:${mm}`;
+              current.time = `${valPart.substring(tIdx + 1, tIdx + 3)}:${valPart.substring(tIdx + 3, tIdx + 5)}`;
             } else {
               current.time = 'Todo el día';
             }
@@ -195,98 +267,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
       }
     }
     return parsed;
-  };
-
-  const fetchCalendarData = async () => {
-    setIsLoading(true);
-    try {
-      // 1. Obtener todos los calendarios sin filtros de usuario
-      const [resExt, resCats, resCrm] = await Promise.all([
-        supabase.from('external_calendars').select('*'),
-        supabase.from('calendar_categories').select('*').order('name', { ascending: true }),
-        supabase.from('clients').select('*').order('name', { ascending: true })
-      ]);
-
-      if (resCats.data) setCategoryList(resCats.data);
-      if (resExt.data) setExternalCalendars(resExt.data);
-      if (resCrm.data) setCrmClients(resCrm.data);
-
-      const allActiveMirrorKeys = (resExt.data || []).map((c) => extractCalendarId(c.url)).filter(Boolean);
-
-      // 2. Traer todos los eventos compartidos sin filtrar
-      const { data: allDbEvents, error: evErr } = await supabase
-        .from('calendar_events')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (evErr) console.error('Error cargando eventos:', evErr);
-
-      // FILTRO: Muestra los eventos de la cuenta, O los que coincidan con la URL de Google
-      let mirrorEvents = (allDbEvents || []).filter((item) => {
-        if (item.user_id === user.id) return true;
-        if (item.calendar_key && allActiveMirrorKeys.includes(extractCalendarId(item.calendar_key))) return true;
-        return false;
-      });
-
-      const existingGoogleUids = new Set(mirrorEvents.map((e) => e.google_uid).filter(Boolean));
-
-      // 3. Sync de Google Calendar
-      if (resExt.data && resExt.data.length > 0) {
-        for (const cal of resExt.data) {
-          try {
-            const rawUrl = cal.url.trim();
-            const mirrorKey = extractCalendarId(rawUrl);
-
-            const res = await fetch(`/api/calendar-sync?url=${encodeURIComponent(rawUrl)}`);
-            if (res.ok) {
-              const icsText = await res.text();
-              if (icsText && icsText.includes('BEGIN:VCALENDAR')) {
-                const parsedIcsEvents = parseICS(icsText, cal.name, mirrorKey);
-
-                const toInsert = parsedIcsEvents
-                  .filter((p) => !existingGoogleUids.has(p.google_uid))
-                  .map((p) => ({
-                    title: p.title || 'Evento Google',
-                    description: p.description || '',
-                    address: p.address || '',
-                    phone: '',
-                    client_name: '',
-                    date: p.date || null,
-                    time: p.time || 'Flexible',
-                    category: cal.name,
-                    google_uid: p.google_uid,
-                    calendar_key: mirrorKey,
-                    attachments: [],
-                    voice_notes: [],
-                    is_visada: false,
-                    user_id: user.id
-                  }));
-
-                if (toInsert.length > 0) {
-                  const { data: insertedData } = await supabase
-                    .from('calendar_events')
-                    .insert(toInsert)
-                    .select();
-
-                  if (insertedData) {
-                    mirrorEvents = [...insertedData, ...mirrorEvents];
-                    toInsert.forEach((item) => existingGoogleUids.add(item.google_uid));
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            console.warn(`Error sincronizando espejo: ${cal.name}`);
-          }
-        }
-      }
-
-      setEvents(mirrorEvents);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const nextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
@@ -313,7 +293,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
         return ev.date === dateStr && matchCategory && !ev.is_visada;
       });
       const hasEvents = dayEvents.length > 0;
-      const isMirrorShared = dayEvents.some((ev) => !!ev.calendar_key || !!ev.google_uid);
+      const isSharedGoogle = dayEvents.some((ev) => !!ev.calendar_key || !!ev.google_uid);
 
       days.push(
         <button
@@ -330,23 +310,58 @@ export default function CalendarView({ user }: CalendarViewProps) {
           <span className="text-xs leading-none">{d}</span>
           {hasEvents && (
             <div className="flex gap-0.5 justify-center items-center">
-              <span className={`w-2 h-2 rounded-full ${isMirrorShared ? 'bg-amber-500' : 'bg-indigo-600'}`} />
+              <span className={`w-2 h-2 rounded-full ${isSharedGoogle ? 'bg-amber-500' : 'bg-indigo-600'}`} />
               {dayEvents.length > 1 && <span className="text-[8px] font-bold text-slate-400">+{dayEvents.length}</span>}
             </div>
           )}
         </button>
       );
     }
-
     return days;
   };
 
   const handleToggleVisada = async (ev: any) => {
     const newState = !ev.is_visada;
+    setEvents(prev => prev.map(item => item.id === ev.id ? { ...item, is_visada: newState } : item));
     try {
       await supabase.from('calendar_events').update({ is_visada: newState }).eq('id', ev.id);
-      setEvents((prev) => prev.map((item) => (item.id === ev.id ? { ...item, is_visada: newState } : item)));
     } catch (err) {}
+  };
+
+  const handleTripleClickDelete = async (evId: string) => {
+    const currentCount = deleteClickCount[evId] || 0;
+    
+    if (currentCount === 0) {
+      setDeleteClickCount(prev => ({ ...prev, [evId]: 1 }));
+      setTimeout(() => setDeleteClickCount(prev => ({ ...prev, [evId]: 0 })), 3000);
+    } else if (currentCount === 1) {
+      setDeleteClickCount(prev => ({ ...prev, [evId]: 2 }));
+      setTimeout(() => setDeleteClickCount(prev => ({ ...prev, [evId]: 0 })), 3000);
+    } else if (currentCount === 2) {
+      try {
+        await supabase.from('calendar_events').delete().eq('id', evId);
+        setEvents(prev => prev.filter(e => e.id !== evId));
+        const newCounts = { ...deleteClickCount };
+        delete newCounts[evId];
+        setDeleteClickCount(newCounts);
+      } catch (err: any) {
+        alert('Error eliminando: ' + err.message);
+      }
+    }
+  };
+
+  const getDeleteButtonText = (evId: string) => {
+    const count = deleteClickCount[evId] || 0;
+    if (count === 0) return '🗑️ Borrar Cita';
+    if (count === 1) return '⚠️ ¿Estás seguro?';
+    if (count === 2) return '🔥 ¡Pulsa para confirmar!';
+  };
+
+  const getDeleteButtonColor = (evId: string) => {
+    const count = deleteClickCount[evId] || 0;
+    if (count === 0) return 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100';
+    if (count === 1) return 'bg-orange-500 text-white border-orange-600';
+    if (count === 2) return 'bg-red-600 text-white border-red-700 animate-pulse';
   };
 
   const triggerQuickMediaUpload = (eventId: string) => {
@@ -360,7 +375,6 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
     try {
       const uploadedAttachments: any[] = [];
-
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const isVideo = file.type.startsWith('video/');
@@ -380,15 +394,15 @@ export default function CalendarView({ user }: CalendarViewProps) {
       }
 
       if (uploadedAttachments.length > 0) {
-        const targetEv = events.find((item) => item.id === activeUploadTargetId);
+        const targetEv = events.find(item => item.id === activeUploadTargetId);
         if (targetEv) {
           const updatedAttachments = [...(targetEv.attachments || []), ...uploadedAttachments];
+          setEvents(prev => prev.map(item => item.id === activeUploadTargetId ? { ...item, attachments: updatedAttachments } : item));
           await supabase.from('calendar_events').update({ attachments: updatedAttachments }).eq('id', activeUploadTargetId);
-          setEvents((prev) => prev.map((item) => (item.id === activeUploadTargetId ? { ...item, attachments: updatedAttachments } : item)));
         }
       }
     } catch (err: any) {
-      alert('Error al subir archivos: ' + err.message);
+      alert('Error al subir: ' + err.message);
     } finally {
       e.target.value = '';
       setActiveUploadTargetId(null);
@@ -396,53 +410,47 @@ export default function CalendarView({ user }: CalendarViewProps) {
   };
 
   const handleDeleteAttachmentDirect = async (eventId: string, attIndex: number) => {
-    if (!confirm('¿Eliminar este archivo? Ambos usuarios dejarán de verlo.')) return;
-    const targetEv = events.find((item) => item.id === eventId);
+    if (!confirm('¿Eliminar este archivo? Desaparecerá para ambas cuentas.')) return;
+    const targetEv = events.find(item => item.id === eventId);
     if (!targetEv) return;
 
     const currentAttachments = [...(targetEv.attachments || [])];
     const removedItem = currentAttachments.splice(attIndex, 1)[0];
 
+    setEvents(prev => prev.map(item => item.id === eventId ? { ...item, attachments: currentAttachments } : item));
     try {
       await supabase.from('calendar_events').update({ attachments: currentAttachments }).eq('id', eventId);
-      setEvents((prev) => prev.map((item) => (item.id === eventId ? { ...item, attachments: currentAttachments } : item)));
-
       if (removedItem?.url) {
         const fileName = removedItem.url.split('/').pop();
-        if (fileName) {
-          await supabase.storage.from('chat_attachments').remove([`agenda_adjuntos/${fileName}`]);
-        }
+        if (fileName) await supabase.storage.from('chat_attachments').remove([`agenda_adjuntos/${fileName}`]);
       }
     } catch (err: any) {
-      alert('Error al borrar archivo: ' + err.message);
+      alert('Error al borrar: ' + err.message);
     }
   };
 
   const handleDeleteVoiceNoteDirect = async (eventId: string, vnIndex: number) => {
-    if (!confirm('¿Eliminar esta nota de voz?')) return;
-    const targetEv = events.find((item) => item.id === eventId);
+    if (!confirm('¿Eliminar nota de voz? Desaparecerá para ambos.')) return;
+    const targetEv = events.find(item => item.id === eventId);
     if (!targetEv) return;
 
     const currentNotes = [...(targetEv.voice_notes || [])];
     const removedNote = currentNotes.splice(vnIndex, 1)[0];
 
+    setEvents(prev => prev.map(item => item.id === eventId ? { ...item, voice_notes: currentNotes } : item));
     try {
       await supabase.from('calendar_events').update({ voice_notes: currentNotes }).eq('id', eventId);
-      setEvents((prev) => prev.map((item) => (item.id === eventId ? { ...item, voice_notes: currentNotes } : item)));
-
       if (removedNote?.url) {
         const fileName = removedNote.url.split('/').pop();
-        if (fileName) {
-          await supabase.storage.from('chat_attachments').remove([`agenda_adjuntos/${fileName}`]);
-        }
+        if (fileName) await supabase.storage.from('chat_attachments').remove([`agenda_adjuntos/${fileName}`]);
       }
     } catch (err: any) {
-      alert('Error al borrar nota de voz: ' + err.message);
+      alert('Error: ' + err.message);
     }
   };
 
   const handleRemoveAttachmentFromForm = (index: number) => {
-    setEventForm((prev) => {
+    setEventForm(prev => {
       const updated = [...(prev.attachments || [])];
       updated.splice(index, 1);
       return { ...prev, attachments: updated };
@@ -450,7 +458,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
   };
 
   const handleRemoveVoiceNoteFromForm = (index: number) => {
-    setEventForm((prev) => {
+    setEventForm(prev => {
       const updated = [...(prev.voice_notes || [])];
       updated.splice(index, 1);
       return { ...prev, voice_notes: updated };
@@ -484,16 +492,13 @@ export default function CalendarView({ user }: CalendarViewProps) {
           };
 
           if (targetId === 'form') {
-            setEventForm((prev) => ({
-              ...prev,
-              voice_notes: [...(prev.voice_notes || []), newVoiceNote]
-            }));
+            setEventForm(prev => ({ ...prev, voice_notes: [...(prev.voice_notes || []), newVoiceNote] }));
           } else {
-            const targetEv = events.find((e) => e.id === targetId);
+            const targetEv = events.find(e => e.id === targetId);
             if (targetEv) {
               const updatedNotes = [...(targetEv.voice_notes || []), newVoiceNote];
+              setEvents(prev => prev.map(item => item.id === targetId ? { ...item, voice_notes: updatedNotes } : item));
               await supabase.from('calendar_events').update({ voice_notes: updatedNotes }).eq('id', targetId);
-              setEvents((prev) => prev.map((item) => (item.id === targetId ? { ...item, voice_notes: updatedNotes } : item)));
             }
           }
         }
@@ -503,7 +508,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
       mediaRecorder.start();
       setIsRecording(true);
-      timerIntervalRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+      timerIntervalRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
     } catch (err) {
       alert('Activa los permisos del micrófono.');
     }
@@ -512,7 +517,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach((t) => t.stop());
+      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
       clearInterval(timerIntervalRef.current);
       setIsRecording(false);
     }
@@ -536,10 +541,10 @@ export default function CalendarView({ user }: CalendarViewProps) {
           ...prev,
           attachments: [
             ...(prev.attachments || []),
-            {
-              name: file.name,
-              url: urlData.publicUrl,
-              type: isVideo ? 'video' : file.type.startsWith('image/') ? 'image' : 'file'
+            { 
+              name: file.name, 
+              url: urlData.publicUrl, 
+              type: isVideo ? 'video' : file.type.startsWith('image/') ? 'image' : 'file' 
             }
           ]
         }));
@@ -569,10 +574,10 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const handleSaveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const matchedExtCal = externalCalendars.find((c) => c.name === eventForm.category);
+    const matchedExtCal = externalCalendars.find(c => c.name === eventForm.category);
     const resolvedMirrorKey = matchedExtCal 
-      ? extractCalendarId(matchedExtCal.url) 
-      : (eventForm.calendar_key || (externalCalendars[0] ? extractCalendarId(externalCalendars[0].url) : ''));
+      ? normalizeCalKey(matchedExtCal.url) 
+      : (eventForm.calendar_key || (externalCalendars[0] ? normalizeCalKey(externalCalendars[0].url) : ''));
 
     const payload = {
       title: eventForm.title,
@@ -594,11 +599,11 @@ export default function CalendarView({ user }: CalendarViewProps) {
       if (eventForm.id) {
         const { data, error } = await supabase.from('calendar_events').update(payload).eq('id', eventForm.id).select();
         if (error) throw error;
-        setEvents((prev) => prev.map((item) => (item.id === eventForm.id ? data[0] : item)));
+        setEvents(prev => prev.map(item => item.id === eventForm.id ? data[0] : item));
       } else {
         const { data, error } = await supabase.from('calendar_events').insert([payload]).select();
         if (error) throw error;
-        if (data) setEvents((prev) => [data[0], ...prev]);
+        if (data) setEvents(prev => [data[0], ...prev]);
       }
       setShowEventModal(false);
       resetEventForm();
@@ -611,8 +616,8 @@ export default function CalendarView({ user }: CalendarViewProps) {
     const title = encodeURIComponent(ev.title || 'Cita R1Plus');
     const details = encodeURIComponent(`${ev.description || ''}\n\nCliente: ${ev.client_name || 'N/A'}\nTeléfono: ${ev.phone || 'N/A'}`);
     const location = encodeURIComponent(ev.address || '');
-    
     let datesParam = '';
+    
     if (ev.date) {
       const cleanDate = ev.date.replace(/-/g, '');
       if (ev.time && ev.time !== 'Flexible' && ev.time !== 'Todo el día') {
@@ -622,25 +627,23 @@ export default function CalendarView({ user }: CalendarViewProps) {
         datesParam = `&dates=${cleanDate}/${cleanDate}`;
       }
     }
-
-    const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}${datesParam}`;
-    window.open(gcalUrl, '_blank');
+    window.open(`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&location=${location}${datesParam}`, '_blank');
   };
 
   const resetEventForm = () => {
     setIsSinFecha(false);
     setEventForm({
-      id: null,
-      title: '',
-      description: '',
-      client_name: '',
-      phone: '',
+      id: null, 
+      title: '', 
+      description: '', 
+      client_name: '', 
+      phone: '', 
       address: '',
-      date: selectedDate,
-      time: '10:00',
+      date: selectedDate, 
+      time: '10:00', 
       category: categoryList[0]?.name || (externalCalendars[0]?.name || 'General'),
-      calendar_key: '',
-      attachments: [],
+      calendar_key: '', 
+      attachments: [], 
       voice_notes: []
     });
   };
@@ -648,11 +651,10 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const handleClientNameChange = (val: string) => {
     setEventForm({ ...eventForm, client_name: val });
     if (val.trim().length > 0) {
-      const filtered = crmClients.filter((c) =>
-        (c.name && c.name.toLowerCase().includes(val.toLowerCase())) ||
+      setCrmSuggestions(crmClients.filter(c => 
+        (c.name && c.name.toLowerCase().includes(val.toLowerCase())) || 
         (c.company && c.company.toLowerCase().includes(val.toLowerCase()))
-      );
-      setCrmSuggestions(filtered);
+      ));
       setShowCrmSuggestions(true);
     } else {
       setShowCrmSuggestions(false);
@@ -660,11 +662,11 @@ export default function CalendarView({ user }: CalendarViewProps) {
   };
 
   const selectCrmClient = (cli: any) => {
-    setEventForm({
-      ...eventForm,
-      client_name: cli.company ? `${cli.name} (${cli.company})` : cli.name,
-      phone: cli.phone || cli.company_phone || '',
-      address: cli.address || ''
+    setEventForm({ 
+      ...eventForm, 
+      client_name: cli.company ? `${cli.name} (${cli.company})` : cli.name, 
+      phone: cli.phone || cli.company_phone || '', 
+      address: cli.address || '' 
     });
     setShowCrmSuggestions(false);
   };
@@ -672,62 +674,49 @@ export default function CalendarView({ user }: CalendarViewProps) {
   const handleSaveQuickCrm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickCrm.name.trim()) return;
-
     try {
-      const payload = { ...quickCrm, user_id: user.id };
-      const { data, error } = await supabase.from('clients').insert([payload]).select();
+      const { data, error } = await supabase.from('clients').insert([{ ...quickCrm, user_id: user.id }]).select();
       if (error) throw error;
-      if (data) {
-        setCrmClients((prev) => [...prev, data[0]]);
-        selectCrmClient(data[0]);
+      if (data) { 
+        setCrmClients(prev => [...prev, data[0]]); 
+        selectCrmClient(data[0]); 
       }
       setQuickCrm({ name: '', phone: '', address: '' });
       setShowQuickNewCrm(false);
-    } catch (err: any) {
-      alert('Error guardando cliente: ' + err.message);
+    } catch (err: any) { 
+      alert('Error guardando cliente: ' + err.message); 
     }
   };
 
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
-    const name = newCategoryName.trim();
-    if (!name) return;
-
+    if (!newCategoryName.trim()) return;
     try {
-      const { data, error } = await supabase
-        .from('calendar_categories')
-        .insert([{ user_id: String(user.id), name }])
-        .select();
-
+      const { data, error } = await supabase.from('calendar_categories').insert([{ user_id: String(user.id), name: newCategoryName.trim() }]).select();
       if (error) throw error;
-      if (data) {
-        setCategoryList((prev) => [...prev, data[0]]);
-        setActiveCategory(data[0].name);
-        setEventForm((prev) => ({ ...prev, category: data[0].name }));
+      if (data) { 
+        setCategoryList(prev => [...prev, data[0]]); 
+        setActiveCategory(data[0].name); 
+        setEventForm(prev => ({ ...prev, category: data[0].name })); 
       }
       setNewCategoryName('');
-    } catch (err: any) {
-      alert('Error creando responsable: ' + err.message);
+    } catch (err: any) { 
+      alert('Error creando responsable: ' + err.message); 
     }
   };
 
   const handleUpdateCategory = async (catId: string) => {
     if (!editCatName.trim()) return;
     try {
-      const { data, error } = await supabase
-        .from('calendar_categories')
-        .update({ name: editCatName.trim() })
-        .eq('id', catId)
-        .select();
-
+      const { data, error } = await supabase.from('calendar_categories').update({ name: editCatName.trim() }).eq('id', catId).select();
       if (error) throw error;
-      if (data) {
-        setCategoryList((prev) => prev.map((c) => (c.id === catId ? data[0] : c)));
-        setEditingCatId(null);
-        setEditCatName('');
+      if (data) { 
+        setCategoryList(prev => prev.map(c => c.id === catId ? data[0] : c)); 
+        setEditingCatId(null); 
+        setEditCatName(''); 
       }
-    } catch (err: any) {
-      alert('Error actualizando responsable: ' + err.message);
+    } catch (err: any) { 
+      alert('Error actualizando responsable: ' + err.message); 
     }
   };
 
@@ -735,41 +724,32 @@ export default function CalendarView({ user }: CalendarViewProps) {
     if (!confirm(`¿Eliminar al responsable "${name}"?`)) return;
     try {
       await supabase.from('calendar_categories').delete().eq('id', catId);
-      setCategoryList((prev) => prev.filter((c) => c.id !== catId));
+      setCategoryList(prev => prev.filter(c => c.id !== catId));
       if (activeCategory === name) setActiveCategory('todos');
-    } catch (err: any) {
-      alert('Error eliminando responsable: ' + err.message);
+    } catch (err: any) { 
+      alert('Error eliminando responsable: ' + err.message); 
     }
   };
 
   const handleAddExternalCalendar = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanUrl = newCalUrl.trim();
-    if (!cleanUrl) return;
-
+    if (!newCalUrl.trim()) return;
     try {
-      const payload = {
-        user_id: String(user.id),
-        name: newCalName || 'Google Calendar Espejo',
-        url: cleanUrl
+      const payload = { 
+        user_id: String(user.id), 
+        name: newCalName || 'Google Calendar Espejo', 
+        url: newCalUrl.trim() 
       };
-
-      const { data, error } = await supabase
-        .from('external_calendars')
-        .insert([payload])
-        .select();
-
+      const { data, error } = await supabase.from('external_calendars').insert([payload]).select();
       if (error) throw error;
-      if (data) {
-        setExternalCalendars((prev) => [...prev, data[0]]);
-      }
-      setNewCalName('');
-      setNewCalUrl('');
+      if (data) setExternalCalendars(prev => [...prev, data[0]]);
+      
+      setNewCalName(''); 
+      setNewCalUrl(''); 
       setShowExternalCalModal(false);
-      fetchCalendarData();
       alert('¡Cuenta vinculada al espejo con éxito!');
-    } catch (err: any) {
-      alert('Error guardando enlace: ' + err.message);
+    } catch (err: any) { 
+      alert('Error guardando enlace: ' + err.message); 
     }
   };
 
@@ -777,39 +757,227 @@ export default function CalendarView({ user }: CalendarViewProps) {
     if (!confirm(`¿Desvincular el calendario "${calName}"?`)) return;
     try {
       await supabase.from('external_calendars').delete().eq('id', calId);
-      setExternalCalendars((prev) => prev.filter((c) => c.id !== calId));
+      setExternalCalendars(prev => prev.filter(c => c.id !== calId));
       if (activeCategory === calName) setActiveCategory('todos');
-      fetchCalendarData();
-    } catch (err: any) {
-      alert('Error eliminando: ' + err.message);
+    } catch (err: any) { 
+      alert('Error eliminando: ' + err.message); 
     }
   };
 
-  const matchingCategoryEvents = events.filter((ev) => {
-    return activeCategory === 'todos' ? true : ev.category === activeCategory;
+  // LÓGICA DE BÚSQUEDA Y FILTRADO
+  const matchingCategoryEvents = events.filter(ev => {
+    const matchCat = activeCategory === 'todos' ? true : ev.category === activeCategory;
+    const searchLower = searchTerm.toLowerCase();
+    const matchSearch = searchTerm === '' ? true : (
+      (ev.title || '').toLowerCase().includes(searchLower) ||
+      (ev.description || '').toLowerCase().includes(searchLower) ||
+      (ev.client_name || '').toLowerCase().includes(searchLower) ||
+      (ev.address || '').toLowerCase().includes(searchLower)
+    );
+    return matchCat && matchSearch;
   });
+  
+  const pendientes = matchingCategoryEvents.filter(ev => !ev.is_visada).sort((a, b) => {
+    if (!a.date && b.date) return -1;
+    if (a.date && !b.date) return 1;
+    if (!a.date && !b.date) return 0;
+    return new Date(a.date).getTime() - new Date(b.date).getTime();
+  });
+  
+  const visadas = matchingCategoryEvents.filter(ev => ev.is_visada);
 
-  const pendientes = matchingCategoryEvents
-    .filter((ev) => !ev.is_visada)
-    .sort((a, b) => {
-      if (!a.date && b.date) return -1;
-      if (a.date && !b.date) return 1;
-      if (!a.date && !b.date) return 0;
-      return new Date(a.date).getTime() - new Date(b.date).getTime();
-    });
+  // FUNCIÓN PARA RENDERIZAR CUALQUIER TARJETA (Pendiente o Visada)
+  const renderEventCard = (ev: any, idx: number) => {
+    const cardKey = ev.id || `ev-${idx}`;
+    const isExpanded = !!expandedCardIds[cardKey];
+    const sinFechaTag = !ev.date;
+    const isShared = !!ev.calendar_key || !!ev.google_uid;
 
-  const visadas = matchingCategoryEvents.filter((ev) => ev.is_visada);
+    return (
+      <div 
+        key={cardKey} 
+        onClick={() => toggleExpandCard(cardKey)} 
+        className={`p-4 bg-white border rounded-2xl shadow-sm space-y-3 transition hover:border-indigo-400 hover:shadow-md cursor-pointer select-none ${ev.is_visada ? 'opacity-80 grayscale-[20%]' : ''} ${sinFechaTag ? 'border-purple-300 bg-purple-50/20' : isShared ? 'border-amber-300 bg-amber-50/20' : 'border-slate-200'}`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              {ev.is_visada && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  ✓ REALIZADA
+                </span>
+              )}
+              {sinFechaTag && !ev.is_visada && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
+                  ⏳ Sin fecha
+                </span>
+              )}
+              {!sinFechaTag && (
+                <>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${isShared ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}>
+                    {isShared ? `🗓️ ${ev.category}` : `👤 ${ev.category || 'General'}`}
+                  </span>
+                  <span className="text-xs font-mono font-bold text-slate-500">
+                    📅 {ev.date} · {ev.time}
+                  </span>
+                </>
+              )}
+              {isShared && (
+                <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-bold">
+                  🔗 Espejo
+                </span>
+              )}
+            </div>
+            <h4 className={`font-black text-slate-800 text-base mt-1 truncate ${ev.is_visada ? 'line-through text-slate-500' : ''}`}>{ev.title}</h4>
+            {ev.client_name && <p className="text-xs font-bold text-indigo-600 mt-0.5">👤 {ev.client_name}</p>}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs text-slate-400 font-bold">{isExpanded ? '▲' : '▼'}</span>
+          </div>
+        </div>
+
+        {/* BOTONERA DE ACCIÓN INMEDIATA */}
+        <div className="flex items-center gap-1.5 flex-wrap pt-1" onClick={(e) => e.stopPropagation()}>
+          <button 
+            onClick={() => handleToggleVisada(ev)} 
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition shadow-sm border flex items-center gap-1 ${ev.is_visada ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
+          >
+            {ev.is_visada ? '↩️ Reabrir' : '✓ Visar'}
+          </button>
+          
+          {isRecording && recordingTargetId === ev.id ? (
+            <button 
+              onClick={stopRecording} 
+              className="px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-xs font-bold animate-pulse transition shadow-sm flex items-center gap-1"
+            >
+              ⏹️ ({recordingSeconds}s)
+            </button>
+          ) : (
+            <button 
+              onClick={() => startRecordingForEvent(ev.id)} 
+              className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
+            >
+              🎙️ Audio
+            </button>
+          )}
+          <button 
+            onClick={() => triggerQuickMediaUpload(ev.id)} 
+            className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
+          >
+            📸 Foto / Vídeo
+          </button>
+          {ev.phone && (
+            <a 
+              href={`tel:${ev.phone}`} 
+              className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
+            >
+              📞 Llamar
+            </a>
+          )}
+          {ev.address && (
+            <a 
+              href={`https://maps.google.com/?q=${encodeURIComponent(ev.address)}`} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
+            >
+              🗺️ Ir
+            </a>
+          )}
+        </div>
+
+        {/* CUERPO DESPLEGABLE */}
+        {isExpanded && (
+          <div className="pt-3 border-t border-slate-100 space-y-3 animate-in fade-in-50" onClick={(e) => e.stopPropagation()}>
+            {ev.address && <p className="text-xs text-slate-600 font-medium">📍 <strong>Dirección:</strong> {ev.address}</p>}
+            {ev.phone && <p className="text-xs text-slate-600 font-medium">📞 <strong>Teléfono:</strong> {ev.phone}</p>}
+            {ev.description && <p className="text-xs text-slate-600 whitespace-pre-wrap bg-slate-50 p-2.5 rounded-xl border border-slate-200">{ev.description}</p>}
+
+            <div className="flex items-center gap-2 flex-wrap pt-1">
+              <button 
+                onClick={() => handleSyncToGoogle(ev)} 
+                className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
+              >
+                🗓️ A Google
+              </button>
+              <button 
+                onClick={() => handleOpenEditEvent(ev)} 
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1"
+              >
+                ✏️ Editar Ficha
+              </button>
+              
+              {/* BOTON TRIPLE CLIC PARA BORRAR */}
+              {ev.id && (
+                <button 
+                  onClick={() => handleTripleClickDelete(ev.id)} 
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-sm border ${getDeleteButtonColor(ev.id)}`}
+                >
+                  {getDeleteButtonText(ev.id)}
+                </button>
+              )}
+            </div>
+
+            {/* ARCHIVOS ADJUNTOS */}
+            {ev.attachments && ev.attachments.length > 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Fotos, Vídeos y Documentos</span>
+                <div className="flex flex-wrap gap-2">
+                  {ev.attachments.map((att: any, aIdx: number) => (
+                    <div key={aIdx} className="flex items-center bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-200 overflow-hidden shadow-sm">
+                      <a 
+                        href={att.url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="px-2.5 py-1 text-slate-700 text-[10px] font-bold flex items-center gap-1 truncate max-w-[180px]"
+                      >
+                        {att.type === 'image' ? '📷 Foto' : att.type === 'video' ? '🎥 Vídeo' : '📄 Doc'}: {att.name}
+                      </a>
+                      <button 
+                        onClick={() => handleDeleteAttachmentDirect(ev.id, aIdx)} 
+                        className="px-2 py-1 text-rose-600 hover:bg-rose-100 border-l border-slate-200 font-black text-xs"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* NOTAS DE VOZ */}
+            {ev.voice_notes && ev.voice_notes.length > 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Notas de voz</span>
+                {ev.voice_notes.map((vn: any, vIdx: number) => (
+                  <div key={vIdx} className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+                    <audio src={vn.url} controls className="flex-1 h-8" />
+                    <button 
+                      onClick={() => handleDeleteVoiceNoteDirect(ev.id, vIdx)} 
+                      className="w-7 h-7 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg font-black text-xs border border-rose-200 shrink-0"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm h-full flex flex-col overflow-y-auto relative no-scrollbar">
       
-      <input
-        type="file"
-        multiple
-        accept="image/*,video/*"
-        ref={quickMediaInputRef}
-        onChange={handleQuickMediaCaptured}
-        className="hidden"
+      <input 
+        type="file" 
+        multiple 
+        accept="image/*,video/*" 
+        ref={quickMediaInputRef} 
+        onChange={handleQuickMediaCaptured} 
+        className="hidden" 
       />
 
       {/* CABECERA */}
@@ -822,15 +990,15 @@ export default function CalendarView({ user }: CalendarViewProps) {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={activeCategory}
-            onChange={(e) => setActiveCategory(e.target.value)}
+          <select 
+            value={activeCategory} 
+            onChange={(e) => setActiveCategory(e.target.value)} 
             className="bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold rounded-xl py-2 px-3 focus:outline-none focus:border-indigo-500 shadow-sm cursor-pointer"
           >
             <option value="todos">🌐 Ver Todo el Espejo</option>
             {categoryList.length > 0 && (
               <optgroup label="Tus Responsables">
-                {categoryList.map((cat) => (
+                {categoryList.map(cat => (
                   <option key={cat.id} value={cat.name}>
                     👤 {cat.name}
                   </option>
@@ -839,7 +1007,7 @@ export default function CalendarView({ user }: CalendarViewProps) {
             )}
             {externalCalendars.length > 0 && (
               <optgroup label="Google Calendars Espejo">
-                {externalCalendars.map((cal) => (
+                {externalCalendars.map(cal => (
                   <option key={cal.id} value={cal.name}>
                     🗓️ {cal.name}
                   </option>
@@ -848,25 +1016,22 @@ export default function CalendarView({ user }: CalendarViewProps) {
             )}
           </select>
 
-          <button
-            onClick={() => setShowManageCatsModal(true)}
+          <button 
+            onClick={() => setShowManageCatsModal(true)} 
             className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold transition shadow-sm"
           >
             ⚙️ Responsables
           </button>
 
-          <button
-            onClick={() => setShowExternalCalModal(true)}
+          <button 
+            onClick={() => setShowExternalCalModal(true)} 
             className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition shadow-sm"
           >
             🔗 Conectar Google
           </button>
 
-          <button
-            onClick={() => {
-              resetEventForm();
-              setShowEventModal(true);
-            }}
+          <button 
+            onClick={() => { resetEventForm(); setShowEventModal(true); }} 
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition"
           >
             + Añadir Visita / Nota
@@ -881,9 +1046,24 @@ export default function CalendarView({ user }: CalendarViewProps) {
             {currentMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
           </span>
           <div className="flex items-center gap-1">
-            <button onClick={prevMonth} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 font-bold">‹</button>
-            <button onClick={() => { setCurrentMonth(new Date()); setSelectedDate(new Date().toISOString().split('T')[0]); }} className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md">Hoy</button>
-            <button onClick={nextMonth} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 font-bold">›</button>
+            <button 
+              onClick={prevMonth} 
+              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 font-bold"
+            >
+              ‹
+            </button>
+            <button 
+              onClick={() => { setCurrentMonth(new Date()); setSelectedDate(new Date().toISOString().split('T')[0]); }} 
+              className="px-2 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md"
+            >
+              Hoy
+            </button>
+            <button 
+              onClick={nextMonth} 
+              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 font-bold"
+            >
+              ›
+            </button>
           </div>
         </div>
 
@@ -896,8 +1076,19 @@ export default function CalendarView({ user }: CalendarViewProps) {
         </div>
       </div>
 
+      {/* BARRA DE BÚSQUEDA */}
+      <div className="pt-3 pb-1 shrink-0">
+        <input 
+          type="text" 
+          placeholder="🔍 Buscar cita, cliente, dirección o notas..." 
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="w-full p-2.5 rounded-xl border border-slate-300 text-sm font-medium focus:outline-none focus:border-indigo-500 shadow-sm"
+        />
+      </div>
+
       {/* ENCABEZADO DE AVISOS */}
-      <div className="py-3 flex items-center justify-between shrink-0">
+      <div className="py-3 flex items-center justify-between shrink-0 border-b border-slate-100 mb-2">
         <span className="text-xs font-black text-indigo-700 uppercase tracking-wider">
           📋 Avisos espejados ({pendientes.length} pendientes)
         </span>
@@ -912,231 +1103,25 @@ export default function CalendarView({ user }: CalendarViewProps) {
           <div className="text-center py-8 text-slate-400 text-sm font-medium">Sincronizando espejo en vivo...</div>
         ) : pendientes.length === 0 && visadas.length === 0 ? (
           <div className="text-center py-10 text-slate-400 font-bold bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-            No hay citas ni notas en este espejo. Pulsa "+ Añadir Visita / Nota".
+            No hay resultados.
           </div>
         ) : (
           <>
-            {pendientes.map((ev, idx) => {
-              const cardKey = ev.id || `ev-${idx}`;
-              const isExpanded = !!expandedCardIds[cardKey];
-              const sinFechaTag = !ev.date;
-              const isShared = !!ev.calendar_key || !!ev.google_uid;
+            {/* RENDER PENDIENTES */}
+            {pendientes.map((ev, idx) => renderEventCard(ev, idx))}
 
-              return (
-                <div
-                  key={cardKey}
-                  onClick={() => toggleExpandCard(cardKey)}
-                  className={`p-4 bg-white border rounded-2xl shadow-sm space-y-3 transition hover:border-indigo-400 hover:shadow-md cursor-pointer select-none ${
-                    sinFechaTag 
-                      ? 'border-purple-300 bg-purple-50/20' 
-                      : isShared 
-                      ? 'border-amber-300 bg-amber-50/20' 
-                      : 'border-slate-200'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {sinFechaTag ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
-                            ⏳ Sin fecha / Cuando pueda
-                          </span>
-                        ) : (
-                          <>
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                              isShared ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
-                            }`}>
-                              {isShared ? `🗓️ ${ev.category}` : `👤 ${ev.category || 'General'}`}
-                            </span>
-                            <span className="text-xs font-mono font-bold text-slate-500">
-                              📅 {ev.date} · {ev.time}
-                            </span>
-                          </>
-                        )}
-                        {isShared && (
-                          <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
-                            🔗 Espejo Activo
-                          </span>
-                        )}
-                      </div>
-                      <h4 className="font-black text-slate-800 text-base mt-1 truncate">{ev.title}</h4>
-                      {ev.client_name && <p className="text-xs font-bold text-indigo-600 mt-0.5">👤 {ev.client_name}</p>}
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs text-slate-400 font-bold">
-                        {isExpanded ? '▲' : '▼'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* BOTONERA DE ACCIÓN INMEDIATA */}
-                  <div className="flex items-center gap-1.5 flex-wrap pt-1" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={() => handleToggleVisada(ev)}
-                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-emerald-100 hover:text-emerald-800 border border-slate-300 rounded-lg text-xs font-bold transition flex items-center gap-1"
-                      title="Marcar como realizada"
-                    >
-                      ✓ Visar
-                    </button>
-
-                    {isRecording && recordingTargetId === ev.id ? (
-                      <button
-                        onClick={stopRecording}
-                        className="px-2.5 py-1.5 bg-rose-600 text-white rounded-lg text-xs font-bold animate-pulse transition shadow-sm flex items-center gap-1"
-                      >
-                        ⏹️ ({recordingSeconds}s)
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => startRecordingForEvent(ev.id)}
-                        className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
-                        title="Grabar audio"
-                      >
-                        🎙️ Audio
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => triggerQuickMediaUpload(ev.id)}
-                      className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
-                      title="Hacer foto, vídeo o seleccionar de memoria"
-                    >
-                      📸 Cámara / Galería
-                    </button>
-
-                    {ev.phone && (
-                      <a
-                        href={`tel:${ev.phone}`}
-                        className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
-                      >
-                        📞 Llamar
-                      </a>
-                    )}
-
-                    {ev.address && (
-                      <a
-                        href={`https://maps.google.com/?q=${encodeURIComponent(ev.address)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
-                      >
-                        🗺️ Ir
-                      </a>
-                    )}
-                  </div>
-
-                  {/* CUERPO DESPLEGABLE */}
-                  {isExpanded && (
-                    <div className="pt-3 border-t border-slate-100 space-y-3 animate-in fade-in-50" onClick={(e) => e.stopPropagation()}>
-                      {ev.address && (
-                        <p className="text-xs text-slate-600 font-medium">📍 <strong>Dirección:</strong> {ev.address}</p>
-                      )}
-                      {ev.phone && (
-                        <p className="text-xs text-slate-600 font-medium">📞 <strong>Teléfono:</strong> {ev.phone}</p>
-                      )}
-                      {ev.description && (
-                        <p className="text-xs text-slate-600 whitespace-pre-wrap bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                          {ev.description}
-                        </p>
-                      )}
-
-                      <div className="flex items-center gap-2 flex-wrap pt-1">
-                        <button
-                          onClick={() => handleSyncToGoogle(ev)}
-                          className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition flex items-center gap-1"
-                        >
-                          🗓️ A Google
-                        </button>
-
-                        <button
-                          onClick={() => handleOpenEditEvent(ev)}
-                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition flex items-center gap-1"
-                        >
-                          ✏️ Editar Ficha Completa
-                        </button>
-                      </div>
-
-                      {/* ARCHIVOS ADJUNTOS */}
-                      {ev.attachments && ev.attachments.length > 0 && (
-                        <div className="pt-2 border-t border-slate-100 space-y-1.5">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Fotos, Vídeos y Documentos</span>
-                          <div className="flex flex-wrap gap-2">
-                            {ev.attachments.map((att: any, aIdx: number) => (
-                              <div
-                                key={aIdx}
-                                className="flex items-center bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-200 overflow-hidden shadow-sm"
-                              >
-                                <a
-                                  href={att.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-2.5 py-1 text-slate-700 text-[10px] font-bold flex items-center gap-1 truncate max-w-[180px]"
-                                >
-                                  {att.type === 'image' ? '📷 Foto' : att.type === 'video' ? '🎥 Vídeo' : '📄 Doc'}: {att.name}
-                                </a>
-                                <button
-                                  onClick={() => handleDeleteAttachmentDirect(ev.id, aIdx)}
-                                  className="px-2 py-1 text-rose-600 hover:bg-rose-100 border-l border-slate-200 font-black text-xs"
-                                  title="Eliminar archivo"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* NOTAS DE VOZ */}
-                      {ev.voice_notes && ev.voice_notes.length > 0 && (
-                        <div className="pt-2 border-t border-slate-100 space-y-2">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Notas de voz</span>
-                          {ev.voice_notes.map((vn: any, vIdx: number) => (
-                            <div key={vIdx} className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
-                              <audio src={vn.url} controls className="flex-1 h-8" />
-                              <button
-                                onClick={() => handleDeleteVoiceNoteDirect(ev.id, vIdx)}
-                                className="w-7 h-7 flex items-center justify-center bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg font-black text-xs border border-rose-200 shrink-0"
-                                title="Eliminar audio"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {/* SECCIÓN VISADAS */}
+            {/* SECCIÓN VISADAS (AHORA MUESTRA LAS FICHAS COMPLETAS) */}
             {visadas.length > 0 && (
-              <div className="pt-4 border-t border-slate-200">
-                <button
-                  onClick={() => setShowVisadas(!showVisadas)}
-                  className="w-full py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-2 transition"
+              <div className="pt-6 mt-4">
+                <button 
+                  onClick={() => setShowVisadas(!showVisadas)} 
+                  className="w-full py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-2 transition shadow-sm"
                 >
                   <span>{showVisadas ? '▲ Ocultar' : '▼ Mostrar'} Visadas / Realizadas ({visadas.length})</span>
                 </button>
-
                 {showVisadas && (
-                  <div className="space-y-2 mt-2">
-                    {visadas.map((ev, idx) => (
-                      <div key={ev.id || idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
-                        <div className="line-through text-slate-500 font-bold truncate">
-                          ✓ {ev.title} <span className="font-normal font-mono text-[10px]">({ev.date || 'Sin fecha'})</span>
-                        </div>
-                        <button
-                          onClick={() => handleToggleVisada(ev)}
-                          className="px-2.5 py-1 text-[10px] font-bold bg-white border border-slate-200 rounded text-indigo-600 hover:bg-indigo-50"
-                        >
-                          Reabrir
-                        </button>
-                      </div>
-                    ))}
+                  <div className="space-y-3 mt-4">
+                    {visadas.map((ev, idx) => renderEventCard(ev, idx))}
                   </div>
                 )}
               </div>
@@ -1159,13 +1144,13 @@ export default function CalendarView({ user }: CalendarViewProps) {
             <form onSubmit={handleSaveEvent} className="space-y-3 text-xs">
               <div>
                 <label className="block font-bold text-slate-600 mb-1">Título / Motivo *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej. Medición carpintería aluminio"
-                  value={eventForm.title}
-                  onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 font-bold focus:outline-none focus:border-indigo-500"
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="Ej. Medición carpintería aluminio" 
+                  value={eventForm.title} 
+                  onChange={(e) => setEventForm({ ...eventForm, title: e.target.value })} 
+                  className="w-full p-2.5 rounded-xl border border-slate-300 font-bold focus:outline-none focus:border-indigo-500" 
                 />
               </div>
 
@@ -1173,32 +1158,30 @@ export default function CalendarView({ user }: CalendarViewProps) {
               <div className="relative">
                 <div className="flex justify-between items-center mb-1">
                   <label className="block font-bold text-slate-600">Cliente CRM</label>
-                  <button
-                    type="button"
-                    onClick={() => setShowQuickNewCrm(!showQuickNewCrm)}
+                  <button 
+                    type="button" 
+                    onClick={() => setShowQuickNewCrm(!showQuickNewCrm)} 
                     className="text-[10px] font-bold text-indigo-600 hover:underline"
                   >
                     {showQuickNewCrm ? '✕ Cancelar' : '+ Nuevo CRM'}
                   </button>
                 </div>
-
                 {!showQuickNewCrm ? (
                   <>
-                    <input
-                      type="text"
-                      placeholder="Escribe para buscar cliente de CRM..."
-                      value={eventForm.client_name}
-                      onChange={(e) => handleClientNameChange(e.target.value)}
-                      onFocus={() => eventForm.client_name.trim() && setShowCrmSuggestions(true)}
-                      className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:outline-none focus:border-indigo-500"
+                    <input 
+                      type="text" 
+                      placeholder="Escribe para buscar cliente de CRM..." 
+                      value={eventForm.client_name} 
+                      onChange={(e) => handleClientNameChange(e.target.value)} 
+                      onFocus={() => eventForm.client_name.trim() && setShowCrmSuggestions(true)} 
+                      className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:outline-none focus:border-indigo-500" 
                     />
-
                     {showCrmSuggestions && crmSuggestions.length > 0 && (
                       <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-40 overflow-y-auto">
                         {crmSuggestions.map((cli) => (
-                          <div
-                            key={cli.id}
-                            onClick={() => selectCrmClient(cli)}
+                          <div 
+                            key={cli.id} 
+                            onClick={() => selectCrmClient(cli)} 
                             className="p-2.5 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 font-bold flex justify-between"
                           >
                             <span>{cli.name} {cli.company ? `(${cli.company})` : ''}</span>
@@ -1211,33 +1194,33 @@ export default function CalendarView({ user }: CalendarViewProps) {
                 ) : (
                   <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                     <span className="font-bold text-slate-700 block">Alta rápida en CRM:</span>
-                    <input
-                      type="text"
-                      placeholder="Nombre completo *"
-                      value={quickCrm.name}
-                      onChange={(e) => setQuickCrm({ ...quickCrm, name: e.target.value })}
-                      className="w-full p-2 rounded-lg border border-slate-300 bg-white"
+                    <input 
+                      type="text" 
+                      placeholder="Nombre completo *" 
+                      value={quickCrm.name} 
+                      onChange={(e) => setQuickCrm({ ...quickCrm, name: e.target.value })} 
+                      className="w-full p-2.5 rounded-lg border border-slate-300 bg-white" 
                     />
                     <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="tel"
-                        placeholder="Teléfono"
-                        value={quickCrm.phone}
-                        onChange={(e) => setQuickCrm({ ...quickCrm, phone: e.target.value })}
-                        className="w-full p-2 rounded-lg border border-slate-300 bg-white"
+                      <input 
+                        type="tel" 
+                        placeholder="Teléfono" 
+                        value={quickCrm.phone} 
+                        onChange={(e) => setQuickCrm({ ...quickCrm, phone: e.target.value })} 
+                        className="w-full p-2.5 rounded-lg border border-slate-300 bg-white" 
                       />
-                      <input
-                        type="text"
-                        placeholder="Dirección"
-                        value={quickCrm.address}
-                        onChange={(e) => setQuickCrm({ ...quickCrm, address: e.target.value })}
-                        className="w-full p-2 rounded-lg border border-slate-300 bg-white"
+                      <input 
+                        type="text" 
+                        placeholder="Dirección" 
+                        value={quickCrm.address} 
+                        onChange={(e) => setQuickCrm({ ...quickCrm, address: e.target.value })} 
+                        className="w-full p-2.5 rounded-lg border border-slate-300 bg-white" 
                       />
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleSaveQuickCrm}
-                      className="w-full py-1.5 bg-indigo-600 text-white rounded-lg font-bold text-xs"
+                    <button 
+                      type="button" 
+                      onClick={handleSaveQuickCrm} 
+                      className="w-full py-2 bg-indigo-600 text-white rounded-lg font-bold text-xs shadow-sm hover:bg-indigo-700"
                     >
                       Guardar en CRM y Seleccionar
                     </button>
@@ -1248,82 +1231,76 @@ export default function CalendarView({ user }: CalendarViewProps) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-600 mb-1">Teléfono (Llamar)</label>
-                  <input
-                    type="tel"
-                    placeholder="600123456"
-                    value={eventForm.phone}
-                    onChange={(e) => setEventForm({ ...eventForm, phone: e.target.value })}
-                    className="w-full p-2.5 rounded-xl border border-slate-300 font-mono focus:outline-none focus:border-indigo-500"
+                  <input 
+                    type="tel" 
+                    placeholder="600123456" 
+                    value={eventForm.phone} 
+                    onChange={(e) => setEventForm({ ...eventForm, phone: e.target.value })} 
+                    className="w-full p-2.5 rounded-xl border border-slate-300 font-mono focus:outline-none focus:border-indigo-500" 
                   />
                 </div>
                 <div>
                   <label className="block font-bold text-slate-600 mb-1">Dirección / Obra (Ir)</label>
-                  <input
-                    type="text"
-                    placeholder="Calle Mayor 10, Madrid"
-                    value={eventForm.address}
-                    onChange={(e) => setEventForm({ ...eventForm, address: e.target.value })}
-                    className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:outline-none focus:border-indigo-500"
+                  <input 
+                    type="text" 
+                    placeholder="Calle Mayor 10, Madrid" 
+                    value={eventForm.address} 
+                    onChange={(e) => setEventForm({ ...eventForm, address: e.target.value })} 
+                    className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:outline-none focus:border-indigo-500" 
                   />
                 </div>
               </div>
 
-              {/* OPCIÓN SIN FECHA */}
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
                 <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={isSinFecha}
-                    onChange={(e) => setIsSinFecha(e.target.checked)}
-                    className="w-4 h-4 rounded text-indigo-600 accent-indigo-600"
+                  <input 
+                    type="checkbox" 
+                    checked={isSinFecha} 
+                    onChange={(e) => setIsSinFecha(e.target.checked)} 
+                    className="w-4 h-4 rounded text-indigo-600 accent-indigo-600" 
                   />
                   <span>Dejar sin fecha (Nota arriba para ir cuando pueda)</span>
                 </label>
-
-                {!isSinFecha ? (
+                {!isSinFecha && (
                   <div className="grid grid-cols-2 gap-3 mt-3">
                     <div>
                       <label className="block font-bold text-slate-600 mb-1">Fecha</label>
-                      <input
-                        type="date"
-                        value={eventForm.date}
-                        onChange={(e) => setEventForm({ ...eventForm, date: e.target.value })}
-                        className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:outline-none focus:border-indigo-500 bg-white"
+                      <input 
+                        type="date" 
+                        value={eventForm.date} 
+                        onChange={(e) => setEventForm({ ...eventForm, date: e.target.value })} 
+                        className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:outline-none focus:border-indigo-500 bg-white" 
                       />
                     </div>
                     <div>
                       <label className="block font-bold text-slate-600 mb-1">Hora</label>
-                      <input
-                        type="time"
-                        value={eventForm.time}
-                        onChange={(e) => setEventForm({ ...eventForm, time: e.target.value })}
-                        className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:outline-none focus:border-indigo-500 bg-white"
+                      <input 
+                        type="time" 
+                        value={eventForm.time} 
+                        onChange={(e) => setEventForm({ ...eventForm, time: e.target.value })} 
+                        className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:outline-none focus:border-indigo-500 bg-white" 
                       />
                     </div>
                   </div>
-                ) : (
-                  <p className="text-[11px] text-purple-700 font-medium mt-1">
-                    ✓ Aparecerá la primera en la lista de abajo para visitarla cuando puedas.
-                  </p>
                 )}
               </div>
 
               <div>
                 <label className="block font-bold text-slate-600 mb-1">Responsable / Calendario</label>
-                <select
-                  value={eventForm.category}
-                  onChange={(e) => setEventForm({ ...eventForm, category: e.target.value })}
+                <select 
+                  value={eventForm.category} 
+                  onChange={(e) => setEventForm({ ...eventForm, category: e.target.value })} 
                   className="w-full p-2.5 rounded-xl border border-slate-300 font-bold focus:outline-none focus:border-indigo-500 bg-white"
                 >
                   <optgroup label="Tus Responsables">
-                    {categoryList.map((c) => (
+                    {categoryList.map(c => (
                       <option key={c.id} value={c.name}>{c.name}</option>
                     ))}
                     {categoryList.length === 0 && <option value="General">General</option>}
                   </optgroup>
                   {externalCalendars.length > 0 && (
                     <optgroup label="Google Calendars Compartidos">
-                      {externalCalendars.map((cal) => (
+                      {externalCalendars.map(cal => (
                         <option key={cal.id} value={cal.name}>🗓️ {cal.name}</option>
                       ))}
                     </optgroup>
@@ -1333,12 +1310,12 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
               <div>
                 <label className="block font-bold text-slate-600 mb-1">Descripción / Notas</label>
-                <textarea
-                  rows={2}
-                  placeholder="Detalles de la cita o visita..."
-                  value={eventForm.description}
-                  onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:outline-none focus:border-indigo-500"
+                <textarea 
+                  rows={2} 
+                  placeholder="Detalles de la cita o visita..." 
+                  value={eventForm.description} 
+                  onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })} 
+                  className="w-full p-2.5 rounded-xl border border-slate-300 font-medium focus:outline-none focus:border-indigo-500" 
                 />
               </div>
 
@@ -1349,17 +1326,17 @@ export default function CalendarView({ user }: CalendarViewProps) {
                   <span className="text-[10px] text-slate-400">{eventForm.voice_notes?.length || 0} grabada(s)</span>
                 </div>
                 {!isRecording ? (
-                  <button
-                    type="button"
-                    onClick={() => startRecordingForEvent('form')}
+                  <button 
+                    type="button" 
+                    onClick={() => startRecordingForEvent('form')} 
                     className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold transition"
                   >
                     ⏺️ Grabar
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={stopRecording}
+                  <button 
+                    type="button" 
+                    onClick={stopRecording} 
                     className="px-3 py-1.5 bg-slate-800 text-white rounded-lg font-bold animate-pulse transition"
                   >
                     ⏹️ Parar ({recordingSeconds}s)
@@ -1369,15 +1346,13 @@ export default function CalendarView({ user }: CalendarViewProps) {
 
               {eventForm.voice_notes && eventForm.voice_notes.length > 0 && (
                 <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                  <span className="font-bold text-slate-600 block text-[10px]">Audios grabados:</span>
                   {eventForm.voice_notes.map((vn: any, vIdx: number) => (
                     <div key={vIdx} className="flex items-center justify-between bg-white p-1 rounded-lg border border-slate-200 gap-2">
                       <audio src={vn.url} controls className="flex-1 h-7" />
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveVoiceNoteFromForm(vIdx)}
+                      <button 
+                        type="button" 
+                        onClick={() => handleRemoveVoiceNoteFromForm(vIdx)} 
                         className="px-2 py-1 text-rose-600 hover:bg-rose-50 rounded font-black text-xs"
-                        title="Borrar audio"
                       >
                         ✕
                       </button>
@@ -1394,29 +1369,27 @@ export default function CalendarView({ user }: CalendarViewProps) {
                 </div>
                 <label className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg font-bold cursor-pointer transition">
                   + Seleccionar
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*,video/*,.pdf,.doc,.docx"
-                    onChange={handleFileUpload}
-                    className="hidden"
+                  <input 
+                    type="file" 
+                    multiple 
+                    accept="image/*,video/*,.pdf,.doc,.docx" 
+                    onChange={handleFileUpload} 
+                    className="hidden" 
                   />
                 </label>
               </div>
 
               {eventForm.attachments && eventForm.attachments.length > 0 && (
                 <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200 max-h-36 overflow-y-auto">
-                  <span className="font-bold text-slate-600 block text-[10px]">Archivos añadidos:</span>
                   {eventForm.attachments.map((att: any, aIdx: number) => (
                     <div key={aIdx} className="flex items-center justify-between bg-white p-1.5 rounded-lg border border-slate-200 text-[10px]">
                       <span className="truncate max-w-[240px] font-bold text-slate-700">
-                        {att.type === 'image' ? '📷 Foto' : att.type === 'video' ? '🎥 Vídeo' : '📄 Doc'}: {att.name}
+                        {att.type === 'image' ? '📷' : '📄'} {att.name}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveAttachmentFromForm(aIdx)}
+                      <button 
+                        type="button" 
+                        onClick={() => handleRemoveAttachmentFromForm(aIdx)} 
                         className="text-rose-600 hover:bg-rose-50 px-2 py-0.5 rounded font-black text-xs"
-                        title="Borrar archivo"
                       >
                         ✕
                       </button>
@@ -1426,15 +1399,15 @@ export default function CalendarView({ user }: CalendarViewProps) {
               )}
 
               <div className="flex gap-3 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowEventModal(false)}
-                  className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold"
+                <button 
+                  type="button" 
+                  onClick={() => setShowEventModal(false)} 
+                  className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 transition"
                 >
                   Cancelar
                 </button>
-                <button
-                  type="submit"
+                <button 
+                  type="submit" 
                   className="flex-[2] py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black shadow-md transition"
                 >
                   {eventForm.id ? 'Guardar Cambios' : 'Guardar Cita'}
@@ -1451,23 +1424,28 @@ export default function CalendarView({ user }: CalendarViewProps) {
           <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4 animate-in zoom-in-95 text-xs max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <h3 className="font-black text-lg text-slate-800">👤 Gestión de Responsables</h3>
-              <button onClick={() => setShowManageCatsModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+              <button 
+                onClick={() => setShowManageCatsModal(false)} 
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg"
+              >
+                ✕
+              </button>
             </div>
 
             <form onSubmit={handleCreateCategory} className="space-y-2">
               <label className="block font-bold text-slate-700">Añadir Nuevo Responsable</label>
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej. Pepe, José, Reformas..."
-                  value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
-                  className="flex-1 p-2 rounded-xl border border-slate-300 font-bold focus:outline-none focus:border-indigo-500"
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="Ej. Pepe, José, Reformas..." 
+                  value={newCategoryName} 
+                  onChange={(e) => setNewCategoryName(e.target.value)} 
+                  className="flex-1 p-2 rounded-xl border border-slate-300 font-bold focus:outline-none focus:border-indigo-500" 
                 />
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold shadow-sm"
+                <button 
+                  type="submit" 
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold shadow-sm hover:bg-indigo-700"
                 >
                   + Añadir
                 </button>
@@ -1483,21 +1461,21 @@ export default function CalendarView({ user }: CalendarViewProps) {
                   <div key={cat.id} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2">
                     {editingCatId === cat.id ? (
                       <div className="flex gap-2 flex-1">
-                        <input
-                          type="text"
-                          value={editCatName}
-                          onChange={(e) => setEditCatName(e.target.value)}
-                          className="flex-1 p-1.5 rounded-lg border border-indigo-400 bg-white font-bold"
+                        <input 
+                          type="text" 
+                          value={editCatName} 
+                          onChange={(e) => setEditCatName(e.target.value)} 
+                          className="flex-1 p-1.5 rounded-lg border border-indigo-400 bg-white font-bold" 
                         />
-                        <button
-                          onClick={() => handleUpdateCategory(cat.id)}
-                          className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold text-[10px]"
+                        <button 
+                          onClick={() => handleUpdateCategory(cat.id)} 
+                          className="px-2.5 py-1 bg-emerald-600 text-white rounded-lg font-bold text-[10px] hover:bg-emerald-700"
                         >
                           Guardar
                         </button>
-                        <button
-                          onClick={() => { setEditingCatId(null); setEditCatName(''); }}
-                          className="px-2.5 py-1 bg-slate-200 text-slate-600 rounded-lg font-bold text-[10px]"
+                        <button 
+                          onClick={() => { setEditingCatId(null); setEditCatName(''); }} 
+                          className="px-2.5 py-1 bg-slate-200 text-slate-600 rounded-lg font-bold text-[10px] hover:bg-slate-300"
                         >
                           ✕
                         </button>
@@ -1506,14 +1484,14 @@ export default function CalendarView({ user }: CalendarViewProps) {
                       <>
                         <span className="font-bold text-slate-800 text-sm">👤 {cat.name}</span>
                         <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => { setEditingCatId(cat.id); setEditCatName(cat.name); }}
+                          <button 
+                            onClick={() => { setEditingCatId(cat.id); setEditCatName(cat.name); }} 
                             className="px-2.5 py-1 bg-white hover:bg-slate-100 text-indigo-600 border border-slate-200 rounded-lg text-[10px] font-bold"
                           >
                             ✏️ Editar
                           </button>
-                          <button
-                            onClick={() => handleDeleteCategory(cat.id, cat.name)}
+                          <button 
+                            onClick={() => handleDeleteCategory(cat.id, cat.name)} 
                             className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg text-[10px] font-bold"
                           >
                             🗑️ Borrar
@@ -1527,10 +1505,10 @@ export default function CalendarView({ user }: CalendarViewProps) {
             </div>
 
             <div className="pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setShowManageCatsModal(false)}
-                className="w-full py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold"
+              <button 
+                type="button" 
+                onClick={() => setShowManageCatsModal(false)} 
+                className="w-full py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 transition"
               >
                 Cerrar
               </button>
@@ -1545,7 +1523,12 @@ export default function CalendarView({ user }: CalendarViewProps) {
           <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4 animate-in zoom-in-95 text-xs max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <h3 className="font-black text-lg text-slate-800">🗓️ Calendarios de Google (Espejo)</h3>
-              <button onClick={() => setShowExternalCalModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+              <button 
+                onClick={() => setShowExternalCalModal(false)} 
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg"
+              >
+                ✕
+              </button>
             </div>
 
             {externalCalendars.length > 0 && (
@@ -1557,8 +1540,8 @@ export default function CalendarView({ user }: CalendarViewProps) {
                       <span className="font-bold text-slate-800 block">🗓️ {cal.name}</span>
                       <span className="text-[10px] text-slate-400 truncate block max-w-[200px]">{cal.url}</span>
                     </div>
-                    <button
-                      onClick={() => handleDeleteExternalCalendar(cal.id, cal.name)}
+                    <button 
+                      onClick={() => handleDeleteExternalCalendar(cal.id, cal.name)} 
                       className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg text-[10px] font-bold transition"
                     >
                       Desvincular
@@ -1575,38 +1558,36 @@ export default function CalendarView({ user }: CalendarViewProps) {
             <form onSubmit={handleAddExternalCalendar} className="space-y-3">
               <div>
                 <label className="block font-bold text-slate-600 mb-1">Nombre para este Calendario</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej. Obras Empresa o Agenda Común"
-                  value={newCalName}
-                  onChange={(e) => setNewCalName(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 font-bold focus:outline-none focus:border-indigo-500"
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="Ej. Obras Empresa o Agenda Común" 
+                  value={newCalName} 
+                  onChange={(e) => setNewCalName(e.target.value)} 
+                  className="w-full p-2.5 rounded-xl border border-slate-300 font-bold focus:outline-none focus:border-indigo-500" 
                 />
               </div>
-
               <div>
                 <label className="block font-bold text-slate-600 mb-1">Dirección iCal (.ics) de Google</label>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://calendar.google.com/calendar/ical/.../basic.ics"
-                  value={newCalUrl}
-                  onChange={(e) => setNewCalUrl(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 font-mono text-[11px] focus:outline-none focus:border-indigo-500"
+                <input 
+                  type="url" 
+                  required 
+                  placeholder="https://calendar.google.com/calendar/ical/.../basic.ics" 
+                  value={newCalUrl} 
+                  onChange={(e) => setNewCalUrl(e.target.value)} 
+                  className="w-full p-2.5 rounded-xl border border-slate-300 font-mono text-[11px] focus:outline-none focus:border-indigo-500" 
                 />
               </div>
-
               <div className="flex gap-3 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowExternalCalModal(false)}
-                  className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold"
+                <button 
+                  type="button" 
+                  onClick={() => setShowExternalCalModal(false)} 
+                  className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 transition"
                 >
                   Cancelar
                 </button>
-                <button
-                  type="submit"
+                <button 
+                  type="submit" 
                   className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black shadow-md transition"
                 >
                   Conectar al Espejo
