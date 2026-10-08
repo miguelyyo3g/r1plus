@@ -60,13 +60,6 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const [loginPin, setLoginPin] = useState('');
   const [tempUser, setTempUser] = useState<AuthUser | null>(null);
 
-  const testUsersDb: Record<string, string> = {
-    'user 1': '11111111-1111-1111-1111-111111111111',
-    'user 2': '22222222-2222-2222-2222-222222222222',
-    'user 3': '33333333-3333-3333-3333-333333333333',
-    'admin': '55555555-5555-5555-5555-555555555555'
-  };
-
   useEffect(() => {
     const handleVisibilityChange = () => {
       const lastActive = localStorage.getItem('r1plus_last_active');
@@ -151,35 +144,6 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
       }
     } catch (err: any) {
       setLoginError('Código incorrecto o expirado');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleBypassDbLogin = async (userKey: string) => {
-    setIsLoading(true);
-    setLoginError('');
-    const userId = testUsersDb[userKey];
-    try {
-      const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (error) throw error;
-
-      const userData = {
-        id: profile.id, name: profile.name, email: profile.email, phone: profile.phone,
-        role: profile.role, plan: profile.plan, company: profile.company, companyType: profile.company_type
-      };
-
-      setTempUser(userData);
-      const accountsStr = localStorage.getItem('r1plus_accounts');
-      const accounts = accountsStr ? JSON.parse(accountsStr) : {};
-
-      if (userData.phone && accounts[userData.phone]) {
-        setAuthStep('locked');
-      } else {
-        setAuthStep('setupProfile');
-      }
-    } catch (err: any) {
-      setLoginError('Error de base de datos.');
     } finally {
       setIsLoading(false);
     }
@@ -358,17 +322,6 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
             </div>
             <button type="submit" disabled={isLoading} className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl shadow-lg transition hover:bg-indigo-700 cursor-pointer">{isLoading ? 'Conectando...' : 'Entrar'}</button>
           </form>
-
-          <div className="mt-8 pt-5 border-t border-slate-100">
-            <span className="block text-center text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-3">Entornos de Prueba</span>
-            <div className="grid grid-cols-2 gap-2">
-              {Object.keys(testUsersDb).map((key) => (
-                <button key={key} type="button" disabled={isLoading} onClick={() => handleBypassDbLogin(key)} className={`py-2 rounded-xl text-[10px] font-bold border transition cursor-pointer ${key === 'admin' ? 'bg-indigo-600 text-white col-span-2' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                  {key}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       )}
 
