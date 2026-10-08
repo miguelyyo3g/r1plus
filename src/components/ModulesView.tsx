@@ -64,11 +64,12 @@ export default function ModulesView({ onOpenModule }: ModulesViewProps) {
           />
         )}
 
+        {/* ¡AQUÍ ESTÁ EL CAMBIO! Ya no hay alert, ahora abre la vista 'works' */}
         {(isAdmin || mods.obras_autonomos) && (
           <ModuleCard 
             title="Partes de Trabajo" 
             icon="🏗️" 
-           onClick={() => onOpenModule('works')} 
+            onClick={() => onOpenModule('works')} 
           />
         )}
 
