@@ -10,7 +10,7 @@ export default function BottomNav({ activeTab, displayRole, onTabChange }: Botto
   const navItems = [
     { id: 'chat', icon: '💬', label: 'Chats', always: true },
     { id: 'calendar', icon: '📅', label: 'Agenda', always: true },
-    { id: 'documents', icon: '📁', label: 'Docs', hideFor: 'user_particular' },
+    { id: 'modules', icon: '🎛️', label: 'Módulos', always: true }, // <-- Nuevo botón
     { id: 'tu', icon: '👤', label: 'Tú', always: true },
   ];
 

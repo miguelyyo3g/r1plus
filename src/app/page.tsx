@@ -10,6 +10,7 @@ import TrackingView from '@/components/TrackingView';
 import DocumentsView from '@/components/DocumentsView';
 import ProfileView from '@/components/ProfileView';
 import AdminDashboardView from '@/components/AdminDashboardView';
+import ModulesView from '@/components/ModulesView'; // <-- Añadimos ModulesView
 
 // Importamos los módulos de Layout
 import Header from '@/components/layout/Header';
@@ -25,8 +26,8 @@ interface MainAppViewProps {
 function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps) {
   const getDefaultTab = () => user.role === 'sales_rep' ? 'tracking' : 'chat';
   
-  // Eliminamos 'crm' de las pestañas activas
-  const [activeTab, setActiveTab] = useState<'chat'|'calendar'|'tracking'|'documents'|'tu'>(getDefaultTab());
+  // Añadimos 'modules' a los tipos permitidos
+  const [activeTab, setActiveTab] = useState<'chat'|'calendar'|'tracking'|'modules'|'documents'|'tu'>(getDefaultTab());
   const displayRole = isAdmin ? 'supplier_owner' : user.role;
   
   const tabHistoryRef = useRef<string[]>([getDefaultTab()]);
@@ -94,6 +95,8 @@ function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps)
           {activeTab === 'chat' && <ChatView user={user} />}
           {activeTab === 'calendar' && <CalendarView user={user} />}
           {activeTab === 'tracking' && <TrackingView user={user} />}
+          {/* Aquí inyectamos el nuevo Centro de Módulos */}
+          {activeTab === 'modules' && <ModulesView onOpenModule={handleTabChange} />} 
           {activeTab === 'documents' && <DocumentsView user={user} />}
           {activeTab === 'tu' && <ProfileView user={user} />}
         </div>
@@ -101,7 +104,7 @@ function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps)
 
       {/* 3. COMPONENTE MODULAR NAVEGACIÓN INFERIOR */}
       <BottomNav 
-        activeTab={activeTab} 
+        activeTab={activeTab === 'documents' ? 'modules' : activeTab} // Si está en documents, mantiene iluminado el icono de módulos
         displayRole={displayRole} 
         onTabChange={handleTabChange} 
       />

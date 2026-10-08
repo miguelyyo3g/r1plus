@@ -22,6 +22,7 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
   const [editRole, setEditRole] = useState('');
   const [editPlan, setEditPlan] = useState('');
   const [editCycle, setEditCycle] = useState('');
+  const [editExtraLicenses, setEditExtraLicenses] = useState(0);
 
   // Estadísticas generales incluyendo almacenamiento
   const [stats, setStats] = useState({ 
@@ -81,7 +82,8 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
         
         const total = data.length;
         const suspended = data.filter(u => u.status === 'suspended').length;
-        const paying = data.filter(u => (u.plan === 'pro' || u.plan === 'pro_plus') && u.billing_cycle !== 'free').length;
+        // Actualizado para contar los nuevos planes como clientes de pago
+        const paying = data.filter(u => (u.plan === 'empresa' || u.plan === 'empresa_pro') && u.billing_cycle !== 'free').length;
         const free = data.filter(u => u.plan === 'free' || u.billing_cycle === 'free').length;
         
         setStats(prev => ({ ...prev, total, paying, free, suspended }));
@@ -107,7 +109,10 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
     if (!editingUser) return;
     try {
       const { error } = await supabase.from('profiles').update({ 
-        role: editRole, plan: editPlan, billing_cycle: editCycle
+        role: editRole, 
+        plan: editPlan, 
+        billing_cycle: editCycle,
+        extra_commercial_licenses: editExtraLicenses
       }).eq('id', editingUser.id);
 
       if (error) throw error;
@@ -126,13 +131,10 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
 
   const getRoleLabel = (role: string) => {
     switch(role) {
-      case 'superadmin': return 'Super Administrador';
-      case 'supplier_owner': return 'Gerencia Proveedor';
-      case 'sales_rep': return 'Comercial';
-      case 'buyer': return 'Cliente / Instalador';
-      case 'client_employee': return 'Técnico Cliente';
-      case 'admin': return 'Administrador';
-      default: return 'Usuario Particular';
+      case 'superadmin': return '👑 Super Administrador';
+      case 'admin': return '🏢 Gerencia / Autónomo';
+      case 'sales_rep': return '🚗 Comercial';
+      default: return 'No asignado';
     }
   };
 
@@ -234,11 +236,11 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
                   <td className="py-4 px-5 space-y-2">
                     <span className="block font-bold text-slate-700">{getRoleLabel(u.role)}</span>
                     <span className={`inline-block px-3 py-1 rounded-md font-bold text-[10px] uppercase tracking-wider ${
-                      u.plan === 'pro_plus' ? 'bg-purple-100 text-purple-700 border border-purple-200' :
-                      u.plan === 'pro' ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' :
+                      u.plan === 'empresa_pro' ? 'bg-purple-100 text-purple-700 border border-purple-200' :
+                      u.plan === 'empresa' ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' :
                       'bg-slate-100 text-slate-600 border border-slate-200'
                     }`}>
-                      Plan {u.plan?.replace('_', ' ') || 'Free'}
+                      {u.plan === 'empresa_pro' ? 'Empresa PRO' : u.plan === 'empresa' ? 'Empresa' : 'Plan Free'}
                     </span>
                   </td>
 
@@ -263,7 +265,11 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
                   <td className="py-4 px-5 text-right space-x-2">
                     <button 
                       onClick={() => {
-                        setEditingUser(u); setEditRole(u.role || 'user_particular'); setEditPlan(u.plan || 'free'); setEditCycle(u.billing_cycle || 'monthly');
+                        setEditingUser(u); 
+                        setEditRole(u.role || 'admin'); 
+                        setEditPlan(u.plan || 'free'); 
+                        setEditCycle(u.billing_cycle || 'monthly');
+                        setEditExtraLicenses(u.extra_commercial_licenses || 0);
                       }}
                       className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl font-bold text-xs cursor-pointer shadow-sm transition"
                     >
@@ -348,12 +354,8 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
                   <div>
                     <label className="block text-slate-700 font-bold mb-2">Rol de Acceso en la App</label>
                     <select value={editRole} onChange={e => setEditRole(e.target.value)} className="w-full p-4 rounded-xl bg-white border-2 border-slate-300 font-bold text-base focus:outline-none focus:border-indigo-500 shadow-sm">
-                      <option value="user_particular">Usuario Particular</option>
-                      <option value="buyer">Cliente / Instalador</option>
-                      <option value="client_employee">Técnico Cliente</option>
-                      <option value="sales_rep">Comercial</option>
-                      <option value="supplier_owner">Gerencia Proveedor</option>
-                      <option value="admin">Administrador Global</option>
+                      <option value="admin">🏢 Gerencia / Autónomo</option>
+                      <option value="sales_rep">🚗 Comercial de calle</option>
                       <option value="superadmin">👑 Super Administrador</option>
                     </select>
                   </div>
@@ -361,11 +363,30 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
                   <div>
                     <label className="block text-slate-700 font-bold mb-2">Nivel de Plan (Facturación)</label>
                     <select value={editPlan} onChange={e => setEditPlan(e.target.value)} className="w-full p-4 rounded-xl bg-white border-2 border-slate-300 font-bold text-base focus:outline-none focus:border-indigo-500 shadow-sm">
-                      <option value="free">🟢 Plan Free (Limitado)</option>
-                      <option value="pro">🔵 Plan PRO (Avanzado)</option>
-                      <option value="pro_plus">🟣 Plan PRO Plus (Ilimitado)</option>
+                      <option value="free">🟢 Plan Free (Uso Limitado)</option>
+                      <option value="empresa">🔵 Plan Empresa</option>
+                      <option value="empresa_pro">🟣 Plan Empresa PRO (+ Comerciales)</option>
                     </select>
                   </div>
+
+                  {editPlan === 'empresa_pro' && (
+                    <div className="bg-purple-50 p-4 rounded-xl border border-purple-100">
+                      <label className="block text-purple-900 font-bold mb-2">Licencias Comerciales Extra</label>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="number" 
+                          min="0"
+                          value={editExtraLicenses}
+                          onChange={e => setEditExtraLicenses(parseInt(e.target.value) || 0)}
+                          className="w-24 p-3 rounded-lg bg-white border-2 border-purple-200 font-black text-xl text-center focus:outline-none focus:border-purple-500"
+                        />
+                        <div className="text-xs font-bold text-purple-600 leading-tight">
+                          Comerciales extra a facturar<br/>
+                          <span className="text-purple-400 font-medium">(2 licencias ya incluidas gratis en el plan)</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-slate-700 font-bold mb-2">Estado de Pago / Ciclo</label>
