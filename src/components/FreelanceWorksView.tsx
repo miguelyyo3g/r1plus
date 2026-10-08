@@ -4,16 +4,28 @@ import { supabase } from '../lib/supabase';
 
 export default function FreelanceWorksView({ user }: { user: any }) {
   const [works, setWorks] = useState<any[]>([]);
-  const [team, setTeam] = useState<any[]>([]); // Lista de comerciales para el gerente
+  const [team, setTeam] = useState<any[]>([]);
+  const [crmClients, setCrmClients] = useState<any[]>([]);
+  const [savedConcepts, setSavedConcepts] = useState<any[]>([]);
+  
   const [isLoading, setIsLoading] = useState(true);
   const [view, setView] = useState<'list' | 'new'>('list');
   const [profile, setProfile] = useState<any>(null);
 
-  // Estados del formulario
-  const [title, setTitle] = useState('');
+  // Estados del Formulario Avanzado
+  const [clientMode, setClientMode] = useState<'crm' | 'new'>('crm');
+  const [selectedClientId, setSelectedClientId] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [clientAddress, setClientAddress] = useState('');
+  const [selectedWorker, setSelectedWorker] = useState(''); 
   const [description, setDescription] = useState('');
-  const [price, setPrice] = useState('');
-  const [selectedWorker, setSelectedWorker] = useState(''); // Para que el gerente elija
+  
+  // Partidas (Items)
+  const [items, setItems] = useState([{ concept: '', quantity: 1, price: 0 }]);
+  
+  // Archivos (Fotos, Audios, Docs)
+  const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -25,227 +37,276 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     try {
       const { data: myProfile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       setProfile(myProfile);
-
       const isAdmin = myProfile?.role === 'admin' || myProfile?.role === 'superadmin';
 
-      let query = supabase.from('freelance_works').select('*, worker:profiles!worker_id(name)').order('created_at', { ascending: false });
-      
+      // Identificar ID de la organización
+      let orgId = user.id;
       if (!isAdmin) {
-        // El autónomo solo ve los suyos
-        query = query.eq('worker_id', user.id);
-      } else {
-        // El gerente ve los de su organización
-        query = query.eq('organization_id', user.id);
-        
-        // Cargamos los operarios de la empresa para que el gerente pueda seleccionarlos al crear un parte
-        const { data: teamData } = await supabase.from('profiles')
-          .select('id, name')
-          .eq('company', myProfile?.company)
-          .eq('role', 'sales_rep');
-        
-        if (teamData) setTeam(teamData);
+        const { data: adminData } = await supabase.from('profiles').select('id').eq('company', myProfile?.company).eq('role', 'admin').single();
+        orgId = adminData?.id || user.id;
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-      if (data) setWorks(data);
+      // Cargar partes de trabajo
+      let query = supabase.from('freelance_works').select('*, worker:profiles!worker_id(name)').order('created_at', { ascending: false });
+      query = isAdmin ? query.eq('organization_id', user.id) : query.eq('worker_id', user.id);
+      const { data: worksData } = await query;
+      if (worksData) setWorks(worksData);
 
+      // Cargar datos extra para el formulario
+      const { data: clientsData } = await supabase.from('clients').select('*').eq('organization_id', orgId);
+      if (clientsData) setCrmClients(clientsData);
+
+      const { data: conceptsData } = await supabase.from('work_concepts').select('*').eq('organization_id', orgId);
+      if (conceptsData) setSavedConcepts(conceptsData);
+
+      if (isAdmin) {
+        const { data: teamData } = await supabase.from('profiles').select('id, name').eq('company', myProfile?.company).eq('role', 'sales_rep');
+        if (teamData) setTeam(teamData);
+      }
     } catch (error) {
-      console.error('Error cargando partes de trabajo:', error);
+      console.error('Error cargando datos:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Gestión de Partidas (Añadir, Quitar, Modificar)
+  const handleItemChange = (index: number, field: string, value: any) => {
+    const newItems = [...items];
+    newItems[index] = { ...newItems[index], [field]: value };
+    
+    // Si elige un concepto guardado, autocompletar precio
+    if (field === 'concept') {
+      const found = savedConcepts.find(c => c.name === value);
+      if (found) newItems[index].price = found.default_price;
+    }
+    setItems(newItems);
+  };
+  const addItem = () => setItems([...items, { concept: '', quantity: 1, price: 0 }]);
+  const removeItem = (index: number) => setItems(items.filter((_, i) => i !== index));
+  const calculateTotal = () => items.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
+
+  // Subir Archivos a Supabase Storage
+  const uploadFiles = async (workId: string) => {
+    const uploadedUrls = [];
+    for (const file of files) {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${workId}_${Date.now()}.${fileExt}`;
+      const { data, error } = await supabase.storage.from('work_attachments').upload(fileName, file);
+      if (data) {
+        const { data: urlData } = supabase.storage.from('work_attachments').getPublicUrl(fileName);
+        uploadedUrls.push(urlData.publicUrl);
+      }
+    }
+    return uploadedUrls;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+    const total = calculateTotal();
 
-    if (!title || !price) return alert('El título y el precio son obligatorios');
-    if (isAdmin && !selectedWorker) return alert('Debes seleccionar a qué operario pertenece este parte');
+    if (items.some(i => !i.concept)) return alert('Rellena el nombre de todos los conceptos.');
+    if (isAdmin && !selectedWorker) return alert('Selecciona el operario.');
     
     setIsSubmitting(true);
-
     try {
       let organizationId = user.id;
-      let workerId = user.id;
+      let workerId = isAdmin ? selectedWorker : user.id;
 
-      if (isAdmin) {
-        // Si lo crea el gerente, asigna el ID del operario seleccionado
-        organizationId = user.id; 
-        workerId = selectedWorker; 
-      } else {
-        // Si lo crea el autónomo, busca el ID de su jefe
-        workerId = user.id;
-        const { data: adminData } = await supabase.from('profiles')
-          .select('id')
-          .eq('company', profile?.company)
-          .eq('role', 'admin')
-          .single();
+      if (!isAdmin) {
+        const { data: adminData } = await supabase.from('profiles').select('id').eq('company', profile?.company).eq('role', 'admin').single();
         organizationId = adminData?.id || user.id;
       }
 
-      const { error } = await supabase.from('freelance_works').insert({
+      // 1. Guardar conceptos nuevos para el futuro
+      for (const item of items) {
+        if (!savedConcepts.find(c => c.name === item.concept)) {
+          await supabase.from('work_concepts').insert({ organization_id: organizationId, name: item.concept, default_price: item.price });
+        }
+      }
+
+      // 2. Crear el Parte
+      const { data: newWork, error } = await supabase.from('freelance_works').insert({
         organization_id: organizationId,
         worker_id: workerId,
-        title,
+        client_id: clientMode === 'crm' ? selectedClientId : null,
+        client_name: clientMode === 'crm' ? crmClients.find(c=>c.id===selectedClientId)?.name : clientName,
+        client_phone: clientMode === 'new' ? clientPhone : null,
+        client_address: clientMode === 'new' ? clientAddress : null,
+        title: `Parte de Trabajo - ${new Date().toLocaleDateString()}`,
         description,
-        price: parseFloat(price),
+        price: total,
+        items,
         status: 'pendiente_revision'
-      });
+      }).select().single();
 
       if (error) throw error;
+
+      // 3. Subir Archivos y actualizar el parte
+      if (files.length > 0 && newWork) {
+        const urls = await uploadFiles(newWork.id);
+        await supabase.from('freelance_works').update({ attachments: urls }).eq('id', newWork.id);
+      }
       
-      alert('Parte de trabajo registrado con éxito');
-      setTitle(''); setDescription(''); setPrice(''); setSelectedWorker('');
-      setView('list');
+      alert('Parte registrado con éxito');
+      resetForm();
       loadData();
     } catch (error: any) {
-      alert('Error al enviar: ' + error.message);
+      alert('Error: ' + error.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const resetForm = () => {
+    setView('list'); setItems([{ concept: '', quantity: 1, price: 0 }]); setFiles([]);
+    setClientName(''); setClientPhone(''); setClientAddress(''); setSelectedClientId(''); setDescription('');
+  };
+
   const updateStatus = async (workId: string, newStatus: string) => {
-    try {
-      const { error } = await supabase.from('freelance_works').update({ status: newStatus }).eq('id', workId);
-      if (error) throw error;
-      loadData();
-    } catch (error: any) {
-      alert('Error al actualizar: ' + error.message);
-    }
+    await supabase.from('freelance_works').update({ status: newStatus }).eq('id', workId);
+    loadData();
   };
 
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
-  const totalPagado = works.filter(w => w.status === 'pagado').reduce((acc, curr) => acc + Number(curr.price), 0);
-  const totalPendiente = works.filter(w => w.status !== 'pagado').reduce((acc, curr) => acc + Number(curr.price), 0);
-
-  if (isLoading) return <div className="p-8 text-center text-slate-500 font-bold">Cargando partes de obra...</div>;
+  if (isLoading) return <div className="p-8 text-center font-bold">Cargando...</div>;
 
   return (
     <div className="p-4 sm:p-6 pb-24 max-w-4xl mx-auto space-y-6">
-      
       {/* Cabecera */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex justify-between items-center">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-black text-slate-800">🏗️ Partes de Trabajo</h2>
-          <p className="text-sm text-slate-500 mt-1">Gestión de obras, instalaciones y facturación.</p>
+          <h2 className="text-2xl font-black">🏗️ Partes de Trabajo</h2>
+          <p className="text-sm text-slate-500">Gestión de obras, partidas y adjuntos.</p>
         </div>
-        {view === 'list' && (
-          <button onClick={() => setView('new')} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700">
-            + Nuevo Parte
-          </button>
-        )}
-        {view === 'new' && (
-          <button onClick={() => setView('list')} className="px-4 py-2 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200">
-            Volver
-          </button>
+        {view === 'list' ? (
+          <button onClick={() => setView('new')} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md">+ Nuevo Parte</button>
+        ) : (
+          <button onClick={() => setView('list')} className="px-4 py-2 bg-slate-100 font-bold rounded-xl">Volver</button>
         )}
       </div>
 
       {view === 'new' ? (
-        /* FORMULARIO DE NUEVO PARTE */
-        <form onSubmit={handleSubmit} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-5">
-          <h3 className="font-bold text-slate-700 border-b pb-2">Registrar trabajo realizado</h3>
+        <form onSubmit={handleSubmit} className="bg-white p-6 rounded-2xl shadow-sm border space-y-6">
           
-          {/* Si es gerente, le mostramos el desplegable para elegir operario */}
+          {/* SECCIÓN OPERARIO */}
           {isAdmin && (
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Asignar a Operario / Autónomo</label>
-              <select 
-                value={selectedWorker} 
-                onChange={e => setSelectedWorker(e.target.value)} 
-                className="w-full p-3 rounded-xl border border-slate-300 focus:border-indigo-500 outline-none font-medium bg-slate-50" 
-                required
-              >
-                <option value="">-- Selecciona quién hizo el trabajo --</option>
-                {team.map(t => (
-                  <option key={t.id} value={t.id}>{t.name || 'Sin nombre'}</option>
-                ))}
+            <div className="bg-slate-50 p-4 rounded-xl border">
+              <label className="block text-xs font-bold uppercase mb-1">Operario asignado</label>
+              <select value={selectedWorker} onChange={e => setSelectedWorker(e.target.value)} className="w-full p-2 rounded-lg border" required>
+                <option value="">Selecciona operario...</option>
+                {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </div>
           )}
 
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Título / Concepto</label>
-            <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej: Instalación de Pérgola" className="w-full p-3 rounded-xl border border-slate-300 focus:border-indigo-500 outline-none font-medium" required />
-          </div>
-          
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Precio Pactado (€)</label>
-            <input type="number" step="0.01" value={price} onChange={e => setPrice(e.target.value)} placeholder="Ej: 350.00" className="w-full p-3 rounded-xl border border-slate-300 focus:border-indigo-500 outline-none font-black text-lg text-indigo-700" required />
+          {/* SECCIÓN CLIENTE */}
+          <div className="space-y-4">
+            <h3 className="font-bold border-b pb-2">Datos del Cliente</h3>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setClientMode('crm')} className={`flex-1 py-2 rounded-lg font-bold text-sm ${clientMode==='crm'?'bg-indigo-100 text-indigo-700':'bg-slate-100'}`}>De CRM</button>
+              <button type="button" onClick={() => setClientMode('new')} className={`flex-1 py-2 rounded-lg font-bold text-sm ${clientMode==='new'?'bg-indigo-100 text-indigo-700':'bg-slate-100'}`}>Nuevo / Manual</button>
+            </div>
+            
+            {clientMode === 'crm' ? (
+              <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} className="w-full p-3 rounded-xl border bg-slate-50" required>
+                <option value="">Seleccionar cliente del CRM...</option>
+                {crmClients.map(c => <option key={c.id} value={c.id}>{c.name} - {c.address}</option>)}
+              </select>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input type="text" placeholder="Nombre completo" value={clientName} onChange={e=>setClientName(e.target.value)} className="p-3 border rounded-xl" required />
+                <input type="tel" placeholder="Teléfono" value={clientPhone} onChange={e=>setClientPhone(e.target.value)} className="p-3 border rounded-xl" />
+                <input type="text" placeholder="Dirección completa" value={clientAddress} onChange={e=>setClientAddress(e.target.value)} className="p-3 border rounded-xl md:col-span-2" />
+              </div>
+            )}
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Descripción / Detalles</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Materiales usados, horas, incidencias..." className="w-full p-3 rounded-xl border border-slate-300 focus:border-indigo-500 outline-none font-medium min-h-[100px]" />
+          {/* SECCIÓN PARTIDAS */}
+          <div className="space-y-4">
+            <h3 className="font-bold border-b pb-2 flex justify-between items-center">
+              Partidas / Conceptos
+              <span className="text-xl text-indigo-600 font-black">{calculateTotal().toFixed(2)} €</span>
+            </h3>
+            
+            <datalist id="saved-concepts">
+              {savedConcepts.map(c => <option key={c.id} value={c.name} />)}
+            </datalist>
+
+            {items.map((item, index) => (
+              <div key={index} className="flex flex-col sm:flex-row gap-2 items-start sm:items-center bg-slate-50 p-3 rounded-xl border">
+                <input list="saved-concepts" placeholder="Concepto (Ej: Instalación puerta)" value={item.concept} onChange={e=>handleItemChange(index, 'concept', e.target.value)} className="flex-1 p-2 border rounded-lg w-full" required />
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <input type="number" min="1" placeholder="Cant." value={item.quantity} onChange={e=>handleItemChange(index, 'quantity', e.target.value)} className="w-20 p-2 border rounded-lg" required />
+                  <input type="number" step="0.01" placeholder="Precio" value={item.price} onChange={e=>handleItemChange(index, 'price', e.target.value)} className="w-24 p-2 border rounded-lg" required />
+                  {items.length > 1 && <button type="button" onClick={()=>removeItem(index)} className="p-2 text-red-500 bg-red-50 rounded-lg font-bold">X</button>}
+                </div>
+              </div>
+            ))}
+            <button type="button" onClick={addItem} className="text-sm font-bold text-indigo-600">+ Añadir otra partida</button>
           </div>
 
-          <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-lg shadow-md hover:bg-indigo-700 disabled:bg-slate-400">
-            {isSubmitting ? 'Guardando...' : isAdmin ? 'Guardar Parte de Trabajo' : 'Enviar Parte para Revisión'}
+          {/* SECCIÓN ADJUNTOS */}
+          <div className="space-y-4">
+            <h3 className="font-bold border-b pb-2">Notas y Archivos (Fotos, Audios...)</h3>
+            <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Observaciones generales del trabajo..." className="w-full p-3 border rounded-xl min-h-[80px]" />
+            
+            <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center bg-slate-50">
+              <input type="file" multiple accept="image/*,video/*,audio/*,.pdf" onChange={e => { if(e.target.files) setFiles(Array.from(e.target.files)) }} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
+              <p className="text-xs text-slate-400 mt-2">Sube fotos de la obra, audios o documentos PDF.</p>
+            </div>
+          </div>
+
+          <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-lg">
+            {isSubmitting ? 'Guardando y subiendo archivos...' : 'Guardar Parte de Trabajo'}
           </button>
         </form>
       ) : (
         /* LISTADO DE TRABAJOS */
         <div className="space-y-4">
-          
-          {/* Tarjetas de totales para el Gerente */}
-          {isAdmin && (
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-amber-50 p-4 rounded-xl border border-amber-200">
-                <p className="text-xs font-bold text-amber-700 uppercase">Pendiente de Pago</p>
-                <p className="text-2xl font-black text-amber-900">{totalPendiente.toFixed(2)} €</p>
-              </div>
-              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200">
-                <p className="text-xs font-bold text-emerald-700 uppercase">Total Pagado</p>
-                <p className="text-2xl font-black text-emerald-900">{totalPagado.toFixed(2)} €</p>
-              </div>
-            </div>
-          )}
-
-          {works.length === 0 ? (
-            <div className="p-8 text-center bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 text-slate-500 font-bold">
-              No hay partes de trabajo registrados aún.
-            </div>
-          ) : (
-            works.map(work => (
-              <div key={work.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          {works.map(work => (
+            <div key={work.id} className="bg-white p-5 rounded-2xl shadow-sm border flex flex-col gap-3">
+              <div className="flex justify-between items-start">
                 <div>
-                  <h4 className="font-black text-slate-800 text-lg">{work.title}</h4>
-                  {isAdmin && <p className="text-xs font-bold text-indigo-600 mt-0.5">👤 Operario: {work.worker?.name || 'Desconocido'}</p>}
-                  <p className="text-sm text-slate-500 mt-1 line-clamp-2">{work.description}</p>
-                  <p className="text-xs text-slate-400 mt-2 font-mono">📅 {new Date(work.created_at).toLocaleDateString()}</p>
+                  <h4 className="font-black text-slate-800">{work.client_name || 'Cliente sin nombre'}</h4>
+                  <p className="text-xs text-slate-500">📍 {work.client_address || 'Sin dirección'}</p>
+                  {isAdmin && <p className="text-xs font-bold text-indigo-600 mt-1">👤 Operario: {work.worker?.name}</p>}
                 </div>
-                
-                <div className="flex flex-col sm:items-end gap-2">
-                  <span className="text-2xl font-black text-slate-800">{Number(work.price).toFixed(2)} €</span>
-                  
-                  <div className="flex gap-2 items-center">
-                    <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                      work.status === 'pagado' ? 'bg-emerald-100 text-emerald-700' :
-                      work.status === 'aprobado' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'
-                    }`}>
-                      {work.status.replace('_', ' ')}
-                    </span>
-                    
-                    {/* Botones de acción para el Gerente */}
-                    {isAdmin && work.status !== 'pagado' && (
-                      <select 
-                        className="text-xs font-bold bg-slate-100 border border-slate-300 rounded-lg px-2 py-1 outline-none"
-                        value={work.status}
-                        onChange={(e) => updateStatus(work.id, e.target.value)}
-                      >
-                        <option value="pendiente_revision">Pendiente</option>
-                        <option value="aprobado">Aprobar</option>
-                        <option value="pagado">Marcar Pagado</option>
-                      </select>
-                    )}
+                <div className="text-right">
+                  <span className="text-xl font-black">{Number(work.price).toFixed(2)} €</span>
+                  <div className="mt-1">
+                    <span className="px-2 py-1 bg-slate-100 text-[10px] font-bold rounded-full uppercase">{work.status.replace('_', ' ')}</span>
                   </div>
                 </div>
               </div>
-            ))
-          )}
+              
+              <div className="bg-slate-50 p-3 rounded-lg text-sm border">
+                <p className="font-bold text-slate-700 mb-1">Partidas:</p>
+                <ul className="list-disc pl-4 text-slate-600">
+                  {work.items?.map((item:any, i:number) => (
+                    <li key={i}>{item.quantity}x {item.concept} - {item.price}€</li>
+                  ))}
+                </ul>
+              </div>
+
+              {work.attachments?.length > 0 && (
+                <div className="flex gap-2 flex-wrap">
+                  {work.attachments.map((url:string, i:number) => (
+                    <a key={i} href={url} target="_blank" rel="noreferrer" className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full font-bold">Ver Adjunto {i+1}</a>
+                  ))}
+                </div>
+              )}
+
+              {isAdmin && work.status !== 'pagado' && (
+                <select className="text-xs font-bold bg-slate-100 border p-2 rounded-lg mt-2" value={work.status} onChange={(e) => updateStatus(work.id, e.target.value)}>
+                  <option value="pendiente_revision">Pendiente</option>
+                  <option value="aprobado">Aprobar</option>
+                  <option value="pagado">Marcar Pagado</option>
+                </select>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>
