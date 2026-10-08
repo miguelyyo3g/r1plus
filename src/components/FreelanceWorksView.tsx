@@ -10,20 +10,17 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   
   const [isLoading, setIsLoading] = useState(true);
   const [view, setView] = useState<'list' | 'form'>('list');
-  const [editingId, setEditingId] = useState<string | null>(null); // <-- Para saber si estamos editando
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [profile, setProfile] = useState<any>(null);
 
-  // Estados de Estadísticas (Multiselección de meses)
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [selectedMonths, setSelectedMonths] = useState<number[]>([-1]); // -1 significa "Todos"
+  const [selectedMonths, setSelectedMonths] = useState<number[]>([-1]);
 
-  // Estados del Formulario
   const [clientMode, setClientMode] = useState<'crm' | 'new'>('crm');
   const [selectedClientId, setSelectedClientId] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   
-  // Dirección desglosada
   const [clientStreet, setClientStreet] = useState('');
   const [clientNumber, setClientNumber] = useState('');
   const [clientPortal, setClientPortal] = useState('');
@@ -84,7 +81,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     }
   };
 
-  // Autocompletar historial
   const handleClientNameChange = (val: string) => {
     setClientName(val);
     const found = freelancePastClients.find(c => c.name.toLowerCase() === val.toLowerCase());
@@ -111,7 +107,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const removeItem = (index: number) => setItems(items.filter((_, i) => i !== index));
   const calculateTotal = () => items.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
 
-  // Prepara el formulario para editar
   const startEditing = (work: any) => {
     setEditingId(work.id);
     if (work.client_id) {
@@ -130,7 +125,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     setItems(work.items?.length > 0 ? work.items : [{ concept: '', quantity: 1, price: 0 }]);
     setDescription(work.description || '');
     setExpenses(work.expenses ? work.expenses.toString() : '');
-    setFiles([]); // No editamos archivos subidos previamente por ahora, los dejamos tal cual.
+    setFiles([]); 
     setView('form');
   };
 
@@ -152,7 +147,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
         organizationId = adminData?.id || user.id;
       }
 
-      // Guardar conceptos nuevos
       for (const item of items) {
         if (!savedConcepts.find(c => c.name === item.concept)) {
           await supabase.from('work_concepts').insert({ organization_id: organizationId, name: item.concept, default_price: item.price });
@@ -189,11 +183,9 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       let currentWorkId = editingId;
 
       if (editingId) {
-        // ACTUALIZAR PARTE EXISTENTE
         const { error } = await supabase.from('freelance_works').update(payload).eq('id', editingId);
         if (error) throw error;
       } else {
-        // CREAR NUEVO PARTE
         const { data: newWork, error } = await supabase.from('freelance_works').insert({
           ...payload, worker_id: user.id, status: 'pendiente_revision'
         }).select().single();
@@ -201,7 +193,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
         currentWorkId = newWork.id;
       }
 
-      // Subir archivos nuevos si hay
       if (files.length > 0 && currentWorkId) {
         const uploadedUrls = [];
         for (const file of files) {
@@ -214,7 +205,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
           }
         }
         
-        // Obtener adjuntos antiguos y sumar los nuevos
         if (editingId) {
           const existing = works.find(w => w.id === editingId)?.attachments || [];
           await supabase.from('freelance_works').update({ attachments: [...existing, ...uploadedUrls] }).eq('id', currentWorkId);
@@ -246,12 +236,12 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   };
 
   const toggleMonth = (m: number) => {
-    if (m === -1) setSelectedMonths([-1]); // Seleccionar todos
+    if (m === -1) setSelectedMonths([-1]); 
     else {
       let newM = selectedMonths.filter(x => x !== -1);
       if (newM.includes(m)) newM = newM.filter(x => x !== m);
       else newM.push(m);
-      if (newM.length === 0) newM = [-1]; // Si desmarca todo, vuelve a "Todos"
+      if (newM.length === 0) newM = [-1]; 
       setSelectedMonths(newM);
     }
   };
@@ -264,7 +254,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     return p.length === 9 ? `34${p}` : p; 
   };
 
-  // ================= ESTADÍSTICAS MULTIMES =================
   const worksThisYear = works.filter(w => new Date(w.created_at).getFullYear() === selectedYear);
   const worksFiltered = worksThisYear.filter(w => selectedMonths.includes(-1) || selectedMonths.includes(new Date(w.created_at).getMonth()));
 
@@ -276,26 +265,26 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const monthsNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
   return (
-    <div className="p-4 sm:p-6 pb-24 max-w-4xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 pb-24 w-full max-w-4xl mx-auto space-y-6 overflow-hidden">
       
-      {/* Cabecera Principal */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border flex justify-between items-center">
-        <div>
+      {/* Cabecera Principal - Ahora apilable en móviles */}
+      <div className="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="w-full">
           <h2 className="text-2xl font-black">🏗️ Partes de Trabajo</h2>
           <p className="text-sm text-slate-500">Gestión y control de obras.</p>
         </div>
         {view === 'list' ? (
-          <button onClick={() => {resetForm(); setView('form');}} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md">+ Nuevo Parte</button>
+          <button onClick={() => {resetForm(); setView('form');}} className="w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md whitespace-nowrap">+ Nuevo Parte</button>
         ) : (
-          <button onClick={resetForm} className="px-4 py-2 bg-slate-100 font-bold rounded-xl">Volver</button>
+          <button onClick={resetForm} className="w-full sm:w-auto px-4 py-2 bg-slate-100 font-bold rounded-xl whitespace-nowrap">Volver</button>
         )}
       </div>
 
       {view === 'list' && (
         <>
           {/* PANEL DE ESTADÍSTICAS */}
-          <div className="bg-white rounded-2xl shadow-sm border overflow-hidden">
-            <div className="bg-slate-50 border-b p-4 flex justify-between items-center">
+          <div className="bg-white rounded-2xl shadow-sm border overflow-hidden w-full">
+            <div className="bg-slate-50 border-b p-4 flex flex-wrap justify-between items-center gap-2">
               <h3 className="font-black text-slate-800">📊 Estadísticas</h3>
               <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} className="text-xs font-bold p-2 rounded-lg border outline-none bg-white">
                 <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>
@@ -303,50 +292,51 @@ export default function FreelanceWorksView({ user }: { user: any }) {
               </select>
             </div>
             
-            {/* Selector de meses (Múltiple) */}
-            <div className="p-3 bg-white border-b flex gap-2 overflow-x-auto whitespace-nowrap hide-scrollbar">
-              <button onClick={() => toggleMonth(-1)} className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${selectedMonths.includes(-1) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+            {/* Selector de meses (Scroll horizontal protegido) */}
+            <div className="p-3 bg-white border-b flex gap-2 overflow-x-auto w-full scrollbar-hide">
+              <button onClick={() => toggleMonth(-1)} className={`px-3 py-1.5 rounded-full text-xs font-bold border whitespace-nowrap transition-colors ${selectedMonths.includes(-1) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
                 Todos
               </button>
               {monthsNames.map((m, i) => (
-                <button key={i} onClick={() => toggleMonth(i)} className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${selectedMonths.includes(i) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                <button key={i} onClick={() => toggleMonth(i)} className={`px-3 py-1.5 rounded-full text-xs font-bold border whitespace-nowrap transition-colors ${selectedMonths.includes(i) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
                   {m}
                 </button>
               ))}
             </div>
 
-            <div className="grid grid-cols-2 divide-x divide-y border-b">
+            <div className="grid grid-cols-2 divide-x divide-y border-b w-full">
               <div className="p-4 text-center bg-blue-50/30">
                 <p className="text-[10px] font-bold text-slate-500 uppercase">Partes e Importe</p>
-                <p className="text-xl font-black text-slate-800">{totalImporte.toFixed(2)}€</p>
-                <p className="text-xs text-slate-400 mt-1">{totalPartes} partes seleccionados</p>
+                <p className="text-lg sm:text-xl font-black text-slate-800 break-words">{totalImporte.toFixed(2)}€</p>
+                <p className="text-xs text-slate-400 mt-1">{totalPartes} seleccionados</p>
               </div>
               <div className="p-4 text-center bg-indigo-50/30">
                 <p className="text-[10px] font-bold text-indigo-400 uppercase">Total Terminado</p>
-                <p className="text-xl font-black text-indigo-700">{totalTerminado.toFixed(2)}€</p>
-                <p className="text-xs text-indigo-400/70 mt-1">Aprobados + Pagados</p>
+                <p className="text-lg sm:text-xl font-black text-indigo-700 break-words">{totalTerminado.toFixed(2)}€</p>
+                <p className="text-[10px] text-indigo-400/70 mt-1">Aprobados + Pagados</p>
               </div>
               <div className="p-4 text-center col-span-2 bg-emerald-50/30">
                 <p className="text-[10px] font-bold text-emerald-500 uppercase">Total Cobrado (En cuenta)</p>
-                <p className="text-2xl font-black text-emerald-700">{totalCobrado.toFixed(2)}€</p>
+                <p className="text-2xl font-black text-emerald-700 break-words">{totalCobrado.toFixed(2)}€</p>
               </div>
             </div>
           </div>
 
           {/* LISTADO DE TRABAJOS */}
-          <div className="space-y-4">
+          <div className="space-y-4 w-full">
             {works.map(work => (
-              <div key={work.id} className="bg-white p-5 rounded-2xl shadow-sm border flex flex-col gap-3 relative">
+              <div key={work.id} className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border flex flex-col gap-3 relative w-full overflow-hidden">
                 
                 {/* BOTÓN EDITAR */}
-                <button onClick={() => startEditing(work)} className="absolute top-4 right-4 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100 hover:bg-indigo-100 transition">
+                <button onClick={() => startEditing(work)} className="absolute top-4 right-4 text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100 hover:bg-indigo-100 transition z-10">
                   ✏️ Editar
                 </button>
 
-                <div className="flex justify-between items-start pr-20">
-                  <div>
-                    <h4 className="font-black text-slate-800">{work.client_name || 'Cliente sin nombre'}</h4>
-                    <p className="text-xs text-slate-500">
+                {/* Evitar overflow con min-w-0 y pr-20 para no pisar el botón */}
+                <div className="flex justify-between items-start pr-20 w-full min-w-0">
+                  <div className="min-w-0 w-full">
+                    <h4 className="font-black text-slate-800 truncate">{work.client_name || 'Cliente sin nombre'}</h4>
+                    <p className="text-xs text-slate-500 break-words mt-1">
                       📍 {work.client_street ? `${work.client_street} ${work.client_number || ''}, ${work.client_city || ''}` : (work.client_address || 'Sin dirección')}
                     </p>
                     <p className="text-[10px] text-slate-400 mt-1 font-mono">{new Date(work.created_at).toLocaleDateString()}</p>
@@ -354,26 +344,25 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                 </div>
                 
                 <div className="flex justify-between items-end border-t border-slate-100 pt-3">
-                  <span className="px-2 py-1 bg-slate-100 text-[10px] font-bold rounded-full uppercase">{work.status.replace('_', ' ')}</span>
-                  <span className="text-xl font-black">{Number(work.price).toFixed(2)} €</span>
+                  <span className="px-2 py-1 bg-slate-100 text-[10px] font-bold rounded-full uppercase truncate max-w-[50%]">{work.status.replace('_', ' ')}</span>
+                  <span className="text-xl font-black break-words max-w-[45%] text-right">{Number(work.price).toFixed(2)} €</span>
                 </div>
                 
-                {/* BOTONES DE ACCIÓN RÁPIDA */}
                 <div className="grid grid-cols-3 gap-2 border-y border-slate-100 py-3 my-1">
                   <a href={work.client_phone ? `tel:${work.client_phone.replace(/[^0-9+]/g, '')}` : '#'} className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-xs font-bold transition-colors ${work.client_phone ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-slate-50 text-slate-300 pointer-events-none'}`}>
-                    <span className="text-lg">📞</span> Llamar
+                    <span className="text-lg">📞</span> <span className="hidden sm:inline">Llamar</span>
                   </a>
                   <a href={work.client_phone ? `https://wa.me/${getWaPhone(work.client_phone)}` : '#'} target="_blank" rel="noreferrer" className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-xs font-bold transition-colors ${work.client_phone ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'bg-slate-50 text-slate-300 pointer-events-none'}`}>
-                    <span className="text-lg">💬</span> WhatsApp
+                    <span className="text-lg">💬</span> <span className="hidden sm:inline">WhatsApp</span>
                   </a>
                   <a href={work.client_phone ? `https://t.me/+${getWaPhone(work.client_phone)}` : '#'} target="_blank" rel="noreferrer" className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-xs font-bold transition-colors ${work.client_phone ? 'bg-sky-50 text-sky-700 hover:bg-sky-100' : 'bg-slate-50 text-slate-300 pointer-events-none'}`}>
-                    <span className="text-lg">✈️</span> Telegram
+                    <span className="text-lg">✈️</span> <span className="hidden sm:inline">Telegram</span>
                   </a>
                 </div>
                 
-                <div className="bg-slate-50 p-3 rounded-lg text-sm border">
+                <div className="bg-slate-50 p-3 rounded-lg text-sm border overflow-hidden">
                   <p className="font-bold text-slate-700 mb-1">Partidas:</p>
-                  <ul className="list-disc pl-4 text-slate-600">
+                  <ul className="list-disc pl-4 text-slate-600 break-words">
                     {work.items?.map((item:any, i:number) => (
                       <li key={i}>{item.quantity}x {item.concept} - {item.price}€</li>
                     ))}
@@ -382,7 +371,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
 
                 {isAdmin && (
                   <div className="flex justify-end pt-1">
-                    <select className="text-xs font-bold bg-white border border-slate-300 shadow-sm p-2 rounded-lg" value={work.status} onChange={(e) => updateStatus(work.id, e.target.value)}>
+                    <select className="text-xs font-bold bg-white border border-slate-300 shadow-sm p-2 rounded-lg max-w-full" value={work.status} onChange={(e) => updateStatus(work.id, e.target.value)}>
                       <option value="pendiente_revision">Pendiente de Revisión</option>
                       <option value="aprobado">Aprobar (Falta pagar)</option>
                       <option value="pagado">💰 Marcar Pagado</option>
@@ -397,7 +386,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
 
       {/* FORMULARIO DE CREACIÓN / EDICIÓN */}
       {view === 'form' && (
-        <form onSubmit={handleSubmit} className="bg-white p-6 rounded-2xl shadow-sm border space-y-6 relative">
+        <form onSubmit={handleSubmit} className="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border space-y-6 relative w-full overflow-hidden">
           
           <div className="space-y-4">
             <h3 className="font-bold border-b pb-2 text-indigo-700">{editingId ? '✏️ Editando Parte' : 'Nuevo Parte de Trabajo'}</h3>
@@ -421,25 +410,24 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                 </datalist>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input type="text" list="past-clients-list" placeholder="Nombre completo" value={clientName} onChange={e=>handleClientNameChange(e.target.value)} className="p-3 border rounded-xl" required />
-                  <input type="tel" placeholder="Teléfono" value={clientPhone} onChange={e=>setClientPhone(e.target.value)} className="p-3 border rounded-xl" />
+                  <input type="text" list="past-clients-list" placeholder="Nombre completo" value={clientName} onChange={e=>handleClientNameChange(e.target.value)} className="w-full p-3 border rounded-xl" required />
+                  <input type="tel" placeholder="Teléfono" value={clientPhone} onChange={e=>setClientPhone(e.target.value)} className="w-full p-3 border rounded-xl" />
                 </div>
                 
-                {/* DIRECCIÓN DESGLOSADA */}
                 <p className="text-xs font-bold text-slate-500 uppercase mt-2">Dirección del trabajo</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <input type="text" placeholder="Calle / Avda" value={clientStreet} onChange={e=>setClientStreet(e.target.value)} className="p-3 border rounded-xl col-span-2" />
-                  <input type="text" placeholder="Número" value={clientNumber} onChange={e=>setClientNumber(e.target.value)} className="p-3 border rounded-xl" />
-                  <input type="text" placeholder="Portal" value={clientPortal} onChange={e=>setClientPortal(e.target.value)} className="p-3 border rounded-xl" />
-                  <input type="text" placeholder="Piso / Puerta" value={clientFloor} onChange={e=>setClientFloor(e.target.value)} className="p-3 border rounded-xl" />
-                  <input type="text" placeholder="Población" value={clientCity} onChange={e=>setClientCity(e.target.value)} className="p-3 border rounded-xl col-span-2 md:col-span-3" />
+                  <input type="text" placeholder="Calle / Avda" value={clientStreet} onChange={e=>setClientStreet(e.target.value)} className="w-full p-3 border rounded-xl col-span-2" />
+                  <input type="text" placeholder="Número" value={clientNumber} onChange={e=>setClientNumber(e.target.value)} className="w-full p-3 border rounded-xl col-span-1" />
+                  <input type="text" placeholder="Portal" value={clientPortal} onChange={e=>setClientPortal(e.target.value)} className="w-full p-3 border rounded-xl col-span-1" />
+                  <input type="text" placeholder="Piso / Pta" value={clientFloor} onChange={e=>setClientFloor(e.target.value)} className="w-full p-3 border rounded-xl col-span-1" />
+                  <input type="text" placeholder="Población" value={clientCity} onChange={e=>setClientCity(e.target.value)} className="w-full p-3 border rounded-xl col-span-2 md:col-span-3" />
                 </div>
               </div>
             )}
           </div>
 
           <div className="space-y-4">
-            <h3 className="font-bold border-b pb-2 flex justify-between items-center">
+            <h3 className="font-bold border-b pb-2 flex justify-between items-center flex-wrap gap-2">
               Partidas / Conceptos
               <span className="text-xl text-indigo-600 font-black">{calculateTotal().toFixed(2)} €</span>
             </h3>
@@ -447,12 +435,12 @@ export default function FreelanceWorksView({ user }: { user: any }) {
               {savedConcepts.map(c => <option key={c.id} value={c.name} />)}
             </datalist>
             {items.map((item, index) => (
-              <div key={index} className="flex flex-col sm:flex-row gap-2 items-start sm:items-center bg-slate-50 p-3 rounded-xl border">
-                <input list="saved-concepts" placeholder="Concepto" value={item.concept} onChange={e=>handleItemChange(index, 'concept', e.target.value)} className="flex-1 p-2 border rounded-lg w-full" required />
-                <div className="flex gap-2 w-full sm:w-auto">
-                  <input type="number" min="1" placeholder="Cant." value={item.quantity} onChange={e=>handleItemChange(index, 'quantity', e.target.value)} className="w-20 p-2 border rounded-lg" required />
-                  <input type="number" step="0.01" placeholder="Precio" value={item.price} onChange={e=>handleItemChange(index, 'price', e.target.value)} className="w-24 p-2 border rounded-lg" required />
-                  {items.length > 1 && <button type="button" onClick={()=>removeItem(index)} className="p-2 text-red-500 bg-red-50 rounded-lg font-bold">X</button>}
+              <div key={index} className="flex flex-col sm:flex-row gap-2 items-start sm:items-center bg-slate-50 p-3 rounded-xl border w-full">
+                <input list="saved-concepts" placeholder="Concepto" value={item.concept} onChange={e=>handleItemChange(index, 'concept', e.target.value)} className="flex-1 p-2 border rounded-lg w-full min-w-0" required />
+                <div className="flex gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                  <input type="number" min="1" placeholder="Cant." value={item.quantity} onChange={e=>handleItemChange(index, 'quantity', e.target.value)} className="w-20 p-2 border rounded-lg flex-shrink-0" required />
+                  <input type="number" step="0.01" placeholder="Precio" value={item.price} onChange={e=>handleItemChange(index, 'price', e.target.value)} className="w-24 p-2 border rounded-lg flex-shrink-0" required />
+                  {items.length > 1 && <button type="button" onClick={()=>removeItem(index)} className="p-2 text-red-500 bg-red-50 rounded-lg font-bold flex-shrink-0">X</button>}
                 </div>
               </div>
             ))}
@@ -467,8 +455,8 @@ export default function FreelanceWorksView({ user }: { user: any }) {
           <div className="space-y-4">
             <h3 className="font-bold border-b pb-2">Notas y Archivos</h3>
             <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Observaciones generales..." className="w-full p-3 border rounded-xl min-h-[80px]" />
-            <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center bg-slate-50">
-              <input type="file" multiple accept="image/*,video/*,audio/*,.pdf" onChange={e => { if(e.target.files) setFiles(Array.from(e.target.files)) }} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
+            <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center bg-slate-50 overflow-hidden">
+              <input type="file" multiple accept="image/*,video/*,audio/*,.pdf" onChange={e => { if(e.target.files) setFiles(Array.from(e.target.files)) }} className="w-full max-w-full text-xs sm:text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
             </div>
           </div>
 
