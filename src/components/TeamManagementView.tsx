@@ -130,6 +130,11 @@ export default function TeamManagementView() {
                     onClick={() => handleToggleModule(member.id, mods, 'obras_autonomos')} 
                   />
                   <ModuleToggle 
+                    label="Presupuestos y Facturas" icon="💶" 
+                    isActive={mods.presupuestos_facturas} 
+                    onClick={() => handleToggleModule(member.id, mods, 'presupuestos_facturas')} 
+                  />
+                  <ModuleToggle 
                     label="Mediciones (Proyectos)" icon="📏" 
                     isActive={mods.mediciones_proyectos} 
                     onClick={() => handleToggleModule(member.id, mods, 'mediciones_proyectos')} 
