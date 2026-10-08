@@ -265,7 +265,8 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const monthsNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
   return (
-    <div className="p-4 sm:p-6 pb-24 w-full max-w-4xl mx-auto space-y-6 overflow-hidden">
+    {/* AQUÍ ESTÁ EL CAMBIO PRINCIPAL: overflow-x-hidden en lugar de overflow-hidden */}
+    <div className="p-4 sm:p-6 pb-24 w-full max-w-4xl mx-auto space-y-6 overflow-x-hidden">
       
       {/* Cabecera Principal - Ahora apilable en móviles */}
       <div className="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
