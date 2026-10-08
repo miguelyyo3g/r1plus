@@ -18,7 +18,11 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonths, setSelectedMonths] = useState<number[]>([-1]);
 
-  const [clientMode, setClientMode] = useState<'crm' | 'new'>('crm');
+  // Gastos en línea (fuera del formulario)
+  const [expenseWorkId, setExpenseWorkId] = useState<string | null>(null);
+  const [expenseValue, setExpenseValue] = useState('');
+
+  const [clientMode, setClientMode] = useState<'crm' | 'new'>('new');
   const [selectedClientId, setSelectedClientId] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
@@ -30,7 +34,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const [clientCity, setClientCity] = useState('');
 
   const [description, setDescription] = useState('');
-  const [expenses, setExpenses] = useState('');
   const [items, setItems] = useState([{ concept: '', quantity: 1, price: 0 }]);
   const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -46,21 +49,19 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       setProfile(myProfile);
       const isAdmin = myProfile?.role === 'admin' || myProfile?.role === 'superadmin';
 
-      if (!isAdmin) setClientMode('new');
-
       let orgId = user.id;
       if (!isAdmin) {
         const { data: adminData } = await supabase.from('profiles').select('id').eq('company', myProfile?.company).eq('role', 'admin').single();
         orgId = adminData?.id || user.id;
       }
 
-      // Ordenar por orden manual (sort_order) y luego por fecha
       let query = supabase.from('freelance_works').select('*, worker:profiles!worker_id(name)').order('sort_order', { ascending: true }).order('created_at', { ascending: false });
       query = isAdmin ? query.eq('organization_id', user.id) : query.eq('worker_id', user.id);
       const { data: worksData } = await query;
       
       if (worksData) {
         setWorks(worksData);
+        // Construir historial de clientes para autocompletar
         const past = worksData.filter(w => w.client_name).map(w => ({ 
           name: w.client_name, phone: w.client_phone, 
           street: w.client_street, city: w.client_city, num: w.client_number, portal: w.client_portal, floor: w.client_floor 
@@ -81,6 +82,20 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       console.error('Error cargando datos:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCrmSelect = (clientId: string) => {
+    setSelectedClientId(clientId);
+    const crmC = crmClients.find(c => c.id === clientId);
+    if (crmC) {
+      setClientName(crmC.name || '');
+      setClientPhone(crmC.phone || '');
+      setClientStreet(crmC.address || ''); // Carga la dirección del CRM en la calle por defecto
+      setClientCity('');
+      setClientNumber('');
+      setClientPortal('');
+      setClientFloor('');
     }
   };
 
@@ -114,22 +129,20 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
     setEditingId(work.id);
     
+    setClientMode('new');
     if (work.client_id) {
-      setClientMode('crm');
       setSelectedClientId(work.client_id);
-    } else {
-      setClientMode('new');
-      setClientName(work.client_name || '');
-      setClientPhone(work.client_phone || '');
-      setClientStreet(work.client_street || '');
-      setClientNumber(work.client_number || '');
-      setClientPortal(work.client_portal || '');
-      setClientFloor(work.client_floor || '');
-      setClientCity(work.client_city || '');
     }
+    setClientName(work.client_name || '');
+    setClientPhone(work.client_phone || '');
+    setClientStreet(work.client_street || '');
+    setClientNumber(work.client_number || '');
+    setClientPortal(work.client_portal || '');
+    setClientFloor(work.client_floor || '');
+    setClientCity(work.client_city || '');
+    
     setItems(work.items?.length > 0 ? work.items : [{ concept: '', quantity: 1, price: 0 }]);
     setDescription(work.description || '');
-    setExpenses(work.expenses ? work.expenses.toString() : '');
     setFiles([]); 
     setView('form');
 
@@ -149,11 +162,9 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     e.preventDefault();
     const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
     const total = calculateTotal();
-    const totalExpenses = parseFloat(expenses || '0');
 
     if (items.some(i => !i.concept)) return alert('Rellena el nombre de todos los conceptos.');
-    if (clientMode === 'crm' && !selectedClientId) return alert('Selecciona un cliente del CRM.');
-    if (clientMode === 'new' && !clientName) return alert('El nombre del cliente es obligatorio.');
+    if (!clientName) return alert('El nombre del cliente es obligatorio.');
     
     setIsSubmitting(true);
     try {
@@ -169,31 +180,20 @@ export default function FreelanceWorksView({ user }: { user: any }) {
         }
       }
 
-      let finalClientName = clientName;
-      let finalClientPhone = clientPhone;
-      
-      if (clientMode === 'crm' && isAdmin) {
-        const crmC = crmClients.find(c => c.id === selectedClientId);
-        finalClientName = crmC?.name || '';
-        finalClientPhone = crmC?.phone || '';
-      }
-
       const payload = {
         organization_id: organizationId,
-        client_id: clientMode === 'crm' && isAdmin ? selectedClientId : null,
-        client_name: finalClientName,
-        client_phone: finalClientPhone,
+        client_id: selectedClientId || null,
+        client_name: clientName,
+        client_phone: clientPhone,
         client_street: clientStreet,
         client_city: clientCity,
         client_number: clientNumber,
         client_portal: clientPortal,
         client_floor: clientFloor,
-        title: `Parte - ${finalClientName}`,
+        title: `Parte - ${clientName}`,
         description,
         price: total,
-        expenses: totalExpenses,
         items,
-        // Si edita el admin, pita al trabajador. Si edita el trabajador, pita al admin.
         unread_admin: !isAdmin,
         unread_worker: isAdmin
       };
@@ -205,7 +205,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
         if (error) throw error;
       } else {
         const { data: newWork, error } = await supabase.from('freelance_works').insert({
-          ...payload, worker_id: user.id, status: 'pendiente_revision', sort_order: works.length
+          ...payload, worker_id: user.id, status: 'ejecutando', sort_order: works.length
         }).select().single();
         if (error) throw error;
         currentWorkId = newWork.id;
@@ -240,22 +240,31 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     }
   };
 
+  const saveExpense = async (workId: string) => {
+    try {
+      await supabase.from('freelance_works').update({ expenses: parseFloat(expenseValue || '0') }).eq('id', workId);
+      setExpenseWorkId(null);
+      loadData();
+    } catch (error: any) {
+      alert('Error guardando gasto: ' + error.message);
+    }
+  };
+
   const resetForm = () => {
     setView('list'); setEditingId(null);
     setItems([{ concept: '', quantity: 1, price: 0 }]); setFiles([]);
     setClientName(''); setClientPhone(''); setClientStreet(''); setClientCity(''); setClientNumber(''); setClientPortal(''); setClientFloor('');
-    setSelectedClientId(''); setDescription(''); setExpenses('');
+    setSelectedClientId(''); setDescription('');
   };
 
   const updateStatus = async (workId: string, newStatus: string) => {
     await supabase.from('freelance_works').update({ 
       status: newStatus,
-      unread_worker: true // Avisa al trabajador del cambio de estado
+      unread_worker: true 
     }).eq('id', workId);
     loadData();
   };
 
-  // Función para reordenar
   const moveWork = async (index: number, direction: 'up' | 'down', list: any[]) => {
     if (direction === 'up' && index === 0) return;
     if (direction === 'down' && index === list.length - 1) return;
@@ -263,24 +272,17 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     const newList = [...list];
     const swapIndex = direction === 'up' ? index - 1 : index + 1;
     
-    // Intercambiar posiciones en local
     const temp = newList[index];
     newList[index] = newList[swapIndex];
     newList[swapIndex] = temp;
 
-    // Asignar el nuevo sort_order
-    const updates = newList.map((item, i) => ({
-      ...item,
-      sort_order: i
-    }));
+    const updates = newList.map((item, i) => ({ ...item, sort_order: i }));
 
-    // Actualizar pantalla al instante
     setWorks(works.map(w => {
       const updated = updates.find(u => u.id === w.id);
       return updated ? updated : w;
     }).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
 
-    // Guardar en Supabase en segundo plano
     for (const update of updates) {
       await supabase.from('freelance_works').update({ sort_order: update.sort_order }).eq('id', update.id);
     }
@@ -305,15 +307,12 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     return p.length === 9 ? `34${p}` : p; 
   };
 
-  // Filtrado de listas
   const activosList = works.filter(w => w.status !== 'pagado');
   const terminadosListFull = works.filter(w => w.status === 'pagado');
   
-  // Las estadísticas se calculan sobre los terminados o los del año
   const worksThisYear = works.filter(w => new Date(w.created_at).getFullYear() === selectedYear);
   const worksFiltered = worksThisYear.filter(w => selectedMonths.includes(-1) || selectedMonths.includes(new Date(w.created_at).getMonth()));
 
-  // Lista visible en la pestaña "Terminados" (filtrada por mes y año)
   const terminadosListFiltered = terminadosListFull.filter(w => 
     new Date(w.created_at).getFullYear() === selectedYear && 
     (selectedMonths.includes(-1) || selectedMonths.includes(new Date(w.created_at).getMonth()))
@@ -321,6 +320,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
 
   const totalPartes = worksFiltered.length;
   const totalImporte = worksFiltered.reduce((sum, w) => sum + Number(w.price || 0), 0);
+  const totalGastos = worksFiltered.reduce((sum, w) => sum + Number(w.expenses || 0), 0);
   const totalTerminado = worksFiltered.filter(w => w.status === 'aprobado' || w.status === 'pagado').reduce((sum, w) => sum + Number(w.price || 0), 0);
   const totalCobrado = worksFiltered.filter(w => w.status === 'pagado').reduce((sum, w) => sum + Number(w.price || 0), 0);
   
@@ -343,16 +343,11 @@ export default function FreelanceWorksView({ user }: { user: any }) {
 
       {view === 'list' && (
         <>
-          {/* BOTÓN DESPLEGABLE DE ESTADÍSTICAS */}
-          <button 
-            onClick={() => setShowStats(!showStats)} 
-            className="w-full bg-white p-3 rounded-2xl shadow-sm border font-bold text-slate-700 flex justify-between items-center"
-          >
+          <button onClick={() => setShowStats(!showStats)} className="w-full bg-white p-3 rounded-2xl shadow-sm border font-bold text-slate-700 flex justify-between items-center">
             <span>📊 Estadísticas y Filtros</span>
             <span>{showStats ? '🔼' : '🔽'}</span>
           </button>
 
-          {/* PANEL DE ESTADÍSTICAS (Ocultable) */}
           {showStats && (
             <div className="bg-white rounded-2xl shadow-sm border overflow-hidden w-full text-sm transition-all">
               <div className="bg-slate-50 border-b p-3 flex justify-between items-center">
@@ -374,11 +369,15 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                   <p className="text-[10px] font-bold text-slate-500 uppercase">Partes</p>
                   <p className="text-sm font-black text-slate-800">{totalImporte.toFixed(2)}€</p>
                 </div>
+                <div className="p-3 text-center bg-rose-50/30">
+                  <p className="text-[10px] font-bold text-rose-400 uppercase">Gastos Extra</p>
+                  <p className="text-sm font-black text-rose-600">-{totalGastos.toFixed(2)}€</p>
+                </div>
                 <div className="p-3 text-center bg-indigo-50/30">
                   <p className="text-[10px] font-bold text-indigo-400 uppercase">Terminado</p>
                   <p className="text-sm font-black text-indigo-700">{totalTerminado.toFixed(2)}€</p>
                 </div>
-                <div className="p-3 text-center col-span-2 bg-emerald-50/30 rounded-b-2xl">
+                <div className="p-3 text-center bg-emerald-50/30 rounded-b-2xl">
                   <p className="text-[10px] font-bold text-emerald-500 uppercase">Total Cobrado</p>
                   <p className="text-lg font-black text-emerald-700">{totalCobrado.toFixed(2)}€</p>
                 </div>
@@ -386,7 +385,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
             </div>
           )}
 
-          {/* PESTAÑAS: EN MARCHA / TERMINADOS */}
           <div className="flex gap-2 bg-slate-200/50 p-1 rounded-xl">
             <button onClick={() => setListTab('activos')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${listTab === 'activos' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:bg-slate-200'}`}>
               En Marcha ({activosList.length})
@@ -396,7 +394,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
             </button>
           </div>
 
-          {/* LISTADO DE TRABAJOS (COMPACTO Y SIN PRECIO EXTERNO) */}
+          {/* LISTADO DE TRABAJOS COMPACTO */}
           <div className="space-y-3 w-full">
             {(listTab === 'activos' ? activosList : terminadosListFiltered).length === 0 && (
               <p className="text-center text-slate-400 text-sm py-4">No hay partes en esta carpeta.</p>
@@ -404,11 +402,13 @@ export default function FreelanceWorksView({ user }: { user: any }) {
 
             {(listTab === 'activos' ? activosList : terminadosListFiltered).map((work, index, array) => {
               const isUnread = (isAdmin && work.unread_admin) || (!isAdmin && work.unread_worker);
+              const mapUrl = work.client_street 
+                ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${work.client_street} ${work.client_number \vert{}\vert{} ''},${work.client_city || ''}`)}`
+                : (work.client_address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(work.client_address)}` : '#');
               
               return (
                 <div key={work.id} className={`p-3 rounded-xl shadow-sm border flex gap-2 relative w-full overflow-hidden transition-all ${isUnread ? 'bg-red-50 border-red-300' : 'bg-white border-slate-200'}`}>
                   
-                  {/* Flechas de ordenación (solo en activos) */}
                   {listTab === 'activos' && (
                     <div className="flex flex-col justify-center gap-1 border-r border-slate-100 pr-2">
                       <button onClick={() => moveWork(index, 'up', array)} disabled={index === 0} className={`p-1 rounded bg-slate-100 text-xs ${index === 0 ? 'opacity-30' : 'active:bg-slate-200'}`}>🔼</button>
@@ -416,7 +416,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                     </div>
                   )}
 
-                  {/* Contenido Compacto */}
                   <div className="flex-1 min-w-0 flex flex-col justify-between">
                     <div>
                       <div className="flex justify-between items-start">
@@ -427,7 +426,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                         📍 {work.client_street ? `${work.client_street} ${work.client_number || ''}` : (work.client_address || 'Sin dirección')}
                       </p>
                       
-                      {/* Mostrar las Notas en vez del Precio */}
                       {work.description && (
                         <p className="text-xs text-slate-600 mt-1.5 line-clamp-2 italic border-l-2 border-slate-200 pl-2">
                           {work.description}
@@ -435,21 +433,40 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                       )}
                     </div>
 
-                    <div className="flex justify-between items-center mt-3 pt-2 border-t border-slate-100/50">
-                      <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full uppercase truncate ${isUnread ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
-                        {work.status.replace('_', ' ')}
-                      </span>
+                    <div className="flex justify-between items-end mt-3 pt-2 border-t border-slate-100/50">
                       
-                      <div className="flex gap-1">
-                        {work.client_phone && (
-                          <>
-                            <a href={`tel:${work.client_phone.replace(/[^0-9+]/g, '')}`} className="w-7 h-7 flex items-center justify-center rounded-lg bg-blue-50 text-blue-600 text-xs">📞</a>
-                            <a href={`https://wa.me/${getWaPhone(work.client_phone)}`} target="_blank" rel="noreferrer" className="w-7 h-7 flex items-center justify-center rounded-lg bg-green-50 text-green-600 text-xs">💬</a>
-                          </>
+                      <div className="flex flex-col gap-1">
+                        <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full uppercase truncate self-start ${isUnread ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {work.status.replace('_', ' ')}
+                        </span>
+                        {work.expenses > 0 && <span className="text-[9px] font-bold text-rose-600 ml-1">Gastos: -{work.expenses}€</span>}
+                      </div>
+                      
+                      <div className="flex flex-col items-end gap-2">
+                        {expenseWorkId === work.id ? (
+                           <div className="flex gap-1">
+                             <input type="number" step="0.01" value={expenseValue} onChange={e => setExpenseValue(e.target.value)} placeholder="0.00" className="w-16 border p-1 text-xs rounded text-center" />
+                             <button onClick={() => saveExpense(work.id)} className="bg-rose-500 text-white text-xs px-2 py-1 rounded font-bold">OK</button>
+                             <button onClick={() => setExpenseWorkId(null)} className="bg-slate-200 text-slate-600 text-xs px-2 py-1 rounded font-bold">X</button>
+                           </div>
+                        ) : (
+                          <div className="flex gap-1">
+                            <a href={mapUrl} target="_blank" rel="noreferrer" className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 text-sm">🗺️</a>
+                            {work.client_phone && (
+                              <>
+                                <a href={`tel:${work.client_phone.replace(/[^0-9+]/g, '')}`} className="w-7 h-7 flex items-center justify-center rounded-lg bg-blue-50 text-blue-600 text-xs">📞</a>
+                                <a href={`https://wa.me/${getWaPhone(work.client_phone)}`} target="_blank" rel="noreferrer" className="w-7 h-7 flex items-center justify-center rounded-lg bg-green-50 text-green-600 text-xs">💬</a>
+                              </>
+                            )}
+                            {/* BOTÓN RÁPIDO DE GASTOS */}
+                            <button onClick={() => { setExpenseWorkId(work.id); setExpenseValue(work.expenses || ''); }} className="w-7 h-7 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 text-xs font-black">
+                              +🔴
+                            </button>
+                            <button onClick={() => startEditing(work)} className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold ml-1">
+                              Abrir {isUnread ? '🔴' : ''}
+                            </button>
+                          </div>
                         )}
-                        <button onClick={() => startEditing(work)} className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold ml-1">
-                          Abrir {isUnread ? '🔴' : ''}
-                        </button>
                       </div>
                     </div>
                   </div>
@@ -474,28 +491,29 @@ export default function FreelanceWorksView({ user }: { user: any }) {
             )}
 
             {clientMode === 'crm' && isAdmin ? (
-              <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} className="w-full p-2.5 text-sm rounded-xl border bg-slate-50" required>
+              <select value={selectedClientId} onChange={e => handleCrmSelect(e.target.value)} className="w-full p-2.5 text-sm rounded-xl border bg-slate-50" required>
                 <option value="">Seleccionar del CRM...</option>
                 {crmClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-            ) : (
-              <div className="space-y-2">
-                <datalist id="past-clients-list">
-                  {freelancePastClients.map((c, i) => <option key={i} value={c.name} />)}
-                </datalist>
-                
-                <input type="text" list="past-clients-list" placeholder="Nombre completo" value={clientName} onChange={e=>handleClientNameChange(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" required />
-                <input type="tel" placeholder="Teléfono" value={clientPhone} onChange={e=>setClientPhone(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" />
-                
-                <p className="text-[10px] font-bold text-slate-500 uppercase mt-2">Dirección</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  <input type="text" placeholder="Calle / Avda" value={clientStreet} onChange={e=>setClientStreet(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl col-span-2" />
-                  <input type="text" placeholder="Núm" value={clientNumber} onChange={e=>setClientNumber(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" />
-                  <input type="text" placeholder="Piso" value={clientFloor} onChange={e=>setClientFloor(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" />
-                  <input type="text" placeholder="Población" value={clientCity} onChange={e=>setClientCity(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl col-span-2" />
-                </div>
+            ) : null}
+
+            {/* Campos de cliente que siempre se muestran para poder editarlos */}
+            <div className="space-y-2">
+              <datalist id="past-clients-list">
+                {freelancePastClients.map((c, i) => <option key={i} value={c.name} />)}
+              </datalist>
+              
+              <input type="text" list="past-clients-list" placeholder="Nombre completo" value={clientName} onChange={e=>handleClientNameChange(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" required />
+              <input type="tel" placeholder="Teléfono" value={clientPhone} onChange={e=>setClientPhone(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" />
+              
+              <p className="text-[10px] font-bold text-slate-500 uppercase mt-2">Dirección</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <input type="text" placeholder="Calle / Avda" value={clientStreet} onChange={e=>setClientStreet(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl col-span-2" />
+                <input type="text" placeholder="Núm" value={clientNumber} onChange={e=>setClientNumber(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" />
+                <input type="text" placeholder="Piso" value={clientFloor} onChange={e=>setClientFloor(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" />
+                <input type="text" placeholder="Población" value={clientCity} onChange={e=>setClientCity(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl col-span-2" />
               </div>
-            )}
+            </div>
           </div>
 
           <div className="space-y-3">
@@ -520,16 +538,10 @@ export default function FreelanceWorksView({ user }: { user: any }) {
           </div>
 
           <div className="space-y-2">
-            <h3 className="font-bold border-b pb-1 text-sm text-rose-600">Gastos (Opcional)</h3>
-            <input type="number" step="0.01" placeholder="Importe gastado" value={expenses} onChange={e=>setExpenses(e.target.value)} className="w-full p-2.5 text-sm border border-rose-200 bg-rose-50 rounded-xl" />
-          </div>
-
-          <div className="space-y-2">
             <h3 className="font-bold border-b pb-1 text-sm">Notas e Imágenes</h3>
             <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Observaciones..." className="w-full p-2.5 text-sm border rounded-xl min-h-[60px]" />
             <input type="file" multiple accept="image/*,video/*,audio/*,.pdf" onChange={e => { if(e.target.files) setFiles(Array.from(e.target.files)) }} className="w-full text-xs text-slate-500 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:bg-indigo-50 file:text-indigo-700" />
             
-            {/* Si estamos editando un parte y tiene archivos viejos, mostramos enlace */}
             {editingId && works.find(w => w.id === editingId)?.attachments?.length > 0 && (
               <div className="flex gap-2 flex-wrap pt-2">
                 {works.find(w => w.id === editingId).attachments.map((url:string, i:number) => (
@@ -542,8 +554,8 @@ export default function FreelanceWorksView({ user }: { user: any }) {
           {isAdmin && editingId && (
             <div className="pt-2 border-t">
               <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Estado del trabajo</label>
-              <select className="w-full p-2.5 text-sm border rounded-xl bg-slate-50 font-bold" value={works.find(w=>w.id===editingId)?.status || 'pendiente_revision'} onChange={(e) => updateStatus(editingId, e.target.value)}>
-                <option value="pendiente_revision">Pendiente de Revisión</option>
+              <select className="w-full p-2.5 text-sm border rounded-xl bg-slate-50 font-bold" value={works.find(w=>w.id===editingId)?.status || 'ejecutando'} onChange={(e) => updateStatus(editingId, e.target.value)}>
+                <option value="ejecutando">Ejecutando (En Marcha)</option>
                 <option value="aprobado">Aprobar (Falta pagar)</option>
                 <option value="pagado">💰 Marcar Pagado (Va a Terminados)</option>
               </select>
