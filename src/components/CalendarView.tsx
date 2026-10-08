@@ -3,7 +3,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from '@/lib/supabaseclient';
+import { supabase } from '../lib/supabaseclient';
 
 interface CalendarViewProps {
   user: AuthUser;
