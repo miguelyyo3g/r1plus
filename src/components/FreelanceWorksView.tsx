@@ -18,7 +18,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonths, setSelectedMonths] = useState<number[]>([-1]);
 
-  // Gastos en línea (fuera del formulario)
   const [expenseWorkId, setExpenseWorkId] = useState<string | null>(null);
   const [expenseValue, setExpenseValue] = useState('');
 
@@ -61,7 +60,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       
       if (worksData) {
         setWorks(worksData);
-        // Construir historial de clientes para autocompletar
         const past = worksData.filter(w => w.client_name).map(w => ({ 
           name: w.client_name, phone: w.client_phone, 
           street: w.client_street, city: w.client_city, num: w.client_number, portal: w.client_portal, floor: w.client_floor 
@@ -91,7 +89,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     if (crmC) {
       setClientName(crmC.name || '');
       setClientPhone(crmC.phone || '');
-      setClientStreet(crmC.address || ''); // Carga la dirección del CRM en la calle por defecto
+      setClientStreet(crmC.address || '');
       setClientCity('');
       setClientNumber('');
       setClientPortal('');
@@ -121,6 +119,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     }
     setItems(newItems);
   };
+
   const addItem = () => setItems([...items, { concept: '', quantity: 1, price: 0 }]);
   const removeItem = (index: number) => setItems(items.filter((_, i) => i !== index));
   const calculateTotal = () => items.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
@@ -146,7 +145,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     setFiles([]); 
     setView('form');
 
-    // Marcar como leído al entrar
     try {
       if (isAdmin && work.unread_admin) {
         await supabase.from('freelance_works').update({ unread_admin: false }).eq('id', work.id);
@@ -318,7 +316,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     (selectedMonths.includes(-1) || selectedMonths.includes(new Date(w.created_at).getMonth()))
   );
 
-  const totalPartes = worksFiltered.length;
   const totalImporte = worksFiltered.reduce((sum, w) => sum + Number(w.price || 0), 0);
   const totalGastos = worksFiltered.reduce((sum, w) => sum + Number(w.expenses || 0), 0);
   const totalTerminado = worksFiltered.filter(w => w.status === 'aprobado' || w.status === 'pagado').reduce((sum, w) => sum + Number(w.price || 0), 0);
@@ -329,7 +326,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   return (
     <div className="p-2 sm:p-4 pb-28 w-full max-w-4xl mx-auto space-y-4 overflow-x-hidden">
       
-      {/* Cabecera Principal */}
       <div className="bg-white p-4 rounded-2xl shadow-sm border flex justify-between items-center">
         <div>
           <h2 className="text-xl font-black">🏗️ Partes</h2>
@@ -394,7 +390,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
             </button>
           </div>
 
-          {/* LISTADO DE TRABAJOS COMPACTO */}
           <div className="space-y-3 w-full">
             {(listTab === 'activos' ? activosList : terminadosListFiltered).length === 0 && (
               <p className="text-center text-slate-400 text-sm py-4">No hay partes en esta carpeta.</p>
@@ -402,9 +397,14 @@ export default function FreelanceWorksView({ user }: { user: any }) {
 
             {(listTab === 'activos' ? activosList : terminadosListFiltered).map((work, index, array) => {
               const isUnread = (isAdmin && work.unread_admin) || (!isAdmin && work.unread_worker);
-              const mapUrl = work.client_street 
-                ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${work.client_street} ${work.client_number \vert{}\vert{} ''},${work.client_city || ''}`)}`
-                : (work.client_address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(work.client_address)}` : '#');
+              
+              let mapUrl = '#';
+              if (work.client_street) {
+                const queryStr = work.client_street + ' ' + (work.client_number || '') + ', ' + (work.client_city || '');
+                mapUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(queryStr);
+              } else if (work.client_address) {
+                mapUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(work.client_address);
+              }
               
               return (
                 <div key={work.id} className={`p-3 rounded-xl shadow-sm border flex gap-2 relative w-full overflow-hidden transition-all ${isUnread ? 'bg-red-50 border-red-300' : 'bg-white border-slate-200'}`}>
@@ -458,8 +458,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                                 <a href={`https://wa.me/${getWaPhone(work.client_phone)}`} target="_blank" rel="noreferrer" className="w-7 h-7 flex items-center justify-center rounded-lg bg-green-50 text-green-600 text-xs">💬</a>
                               </>
                             )}
-                            {/* BOTÓN RÁPIDO DE GASTOS */}
-                            <button onClick={() => { setExpenseWorkId(work.id); setExpenseValue(work.expenses || ''); }} className="w-7 h-7 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 text-xs font-black">
+                            <button onClick={() => { setExpenseWorkId(work.id); setExpenseValue(work.expenses ? String(work.expenses) : ''); }} className="w-7 h-7 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 text-xs font-black">
                               +🔴
                             </button>
                             <button onClick={() => startEditing(work)} className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold ml-1">
@@ -477,7 +476,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
         </>
       )}
 
-      {/* FORMULARIO DE CREACIÓN / EDICIÓN */}
+      {/* FORMULARIO */}
       {view === 'form' && (
         <form onSubmit={handleSubmit} className="bg-white p-4 rounded-2xl shadow-sm border space-y-5 relative w-full">
           <h3 className="font-bold border-b pb-2 text-indigo-700">{editingId ? '✏️ Editando Parte' : 'Nuevo Parte'}</h3>
@@ -497,7 +496,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
               </select>
             ) : null}
 
-            {/* Campos de cliente que siempre se muestran para poder editarlos */}
             <div className="space-y-2">
               <datalist id="past-clients-list">
                 {freelancePastClients.map((c, i) => <option key={i} value={c.name} />)}
@@ -542,9 +540,9 @@ export default function FreelanceWorksView({ user }: { user: any }) {
             <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Observaciones..." className="w-full p-2.5 text-sm border rounded-xl min-h-[60px]" />
             <input type="file" multiple accept="image/*,video/*,audio/*,.pdf" onChange={e => { if(e.target.files) setFiles(Array.from(e.target.files)) }} className="w-full text-xs text-slate-500 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:bg-indigo-50 file:text-indigo-700" />
             
-            {editingId && works.find(w => w.id === editingId)?.attachments?.length > 0 && (
+            {(editingId && (works.find(w => w.id === editingId)?.attachments?.length || 0) > 0) && (
               <div className="flex gap-2 flex-wrap pt-2">
-                {works.find(w => w.id === editingId).attachments.map((url:string, i:number) => (
+                {works.find(w => w.id === editingId)?.attachments.map((url:string, i:number) => (
                   <a key={i} href={url} target="_blank" rel="noreferrer" className="text-[10px] bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border">📎 Archivo {i+1}</a>
                 ))}
               </div>
@@ -554,7 +552,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
           {isAdmin && editingId && (
             <div className="pt-2 border-t">
               <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Estado del trabajo</label>
-              <select className="w-full p-2.5 text-sm border rounded-xl bg-slate-50 font-bold" value={works.find(w=>w.id===editingId)?.status || 'ejecutando'} onChange={(e) => updateStatus(editingId, e.target.value)}>
+              <select className="w-full p-2.5 text-sm border rounded-xl bg-slate-50 font-bold" value={works.find(w=>w.id===editingId)?.status || 'ejecutando'} onChange={(e) => updateStatus(editingId as string, e.target.value)}>
                 <option value="ejecutando">Ejecutando (En Marcha)</option>
                 <option value="aprobado">Aprobar (Falta pagar)</option>
                 <option value="pagado">💰 Marcar Pagado (Va a Terminados)</option>
