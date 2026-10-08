@@ -4,9 +4,9 @@ import { supabase } from '../lib/supabase';
 
 export default function FreelanceWorksView({ user }: { user: any }) {
   const [works, setWorks] = useState<any[]>([]);
-  const [team, setTeam] = useState<any[]>([]);
   const [crmClients, setCrmClients] = useState<any[]>([]);
   const [savedConcepts, setSavedConcepts] = useState<any[]>([]);
+  const [freelancePastClients, setFreelancePastClients] = useState<any[]>([]); // Historial propio del autónomo
   
   const [isLoading, setIsLoading] = useState(true);
   const [view, setView] = useState<'list' | 'new'>('list');
@@ -18,7 +18,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientAddress, setClientAddress] = useState('');
-  const [selectedWorker, setSelectedWorker] = useState(''); 
   const [description, setDescription] = useState('');
   
   // Partidas (Items)
@@ -39,7 +38,9 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       setProfile(myProfile);
       const isAdmin = myProfile?.role === 'admin' || myProfile?.role === 'superadmin';
 
-      // Identificar ID de la organización
+      // Si no es admin, por defecto el modo de cliente es 'new' (manual)
+      if (!isAdmin) setClientMode('new');
+
       let orgId = user.id;
       if (!isAdmin) {
         const { data: adminData } = await supabase.from('profiles').select('id').eq('company', myProfile?.company).eq('role', 'admin').single();
@@ -50,19 +51,25 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       let query = supabase.from('freelance_works').select('*, worker:profiles!worker_id(name)').order('created_at', { ascending: false });
       query = isAdmin ? query.eq('organization_id', user.id) : query.eq('worker_id', user.id);
       const { data: worksData } = await query;
-      if (worksData) setWorks(worksData);
+      
+      if (worksData) {
+        setWorks(worksData);
+        // Extraer historial de clientes únicos para el autocompletado del autónomo
+        const past = worksData.filter(w => w.client_name).map(w => ({ name: w.client_name, phone: w.client_phone, address: w.client_address }));
+        const uniquePast = Array.from(new Map(past.map(item => [item.name, item])).values());
+        setFreelancePastClients(uniquePast);
+      }
 
-      // Cargar datos extra para el formulario
-      const { data: clientsData } = await supabase.from('clients').select('*').eq('organization_id', orgId);
-      if (clientsData) setCrmClients(clientsData);
+      // El gerente carga los clientes del CRM
+      if (isAdmin) {
+        const { data: clientsData } = await supabase.from('clients').select('*').eq('organization_id', orgId);
+        if (clientsData) setCrmClients(clientsData);
+      }
 
+      // Conceptos guardados de la empresa
       const { data: conceptsData } = await supabase.from('work_concepts').select('*').eq('organization_id', orgId);
       if (conceptsData) setSavedConcepts(conceptsData);
 
-      if (isAdmin) {
-        const { data: teamData } = await supabase.from('profiles').select('id, name').eq('company', myProfile?.company).eq('role', 'sales_rep');
-        if (teamData) setTeam(teamData);
-      }
     } catch (error) {
       console.error('Error cargando datos:', error);
     } finally {
@@ -70,12 +77,20 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     }
   };
 
-  // Gestión de Partidas (Añadir, Quitar, Modificar)
+  // Autocompletar datos si el autónomo elige un cliente de su historial
+  const handleClientNameChange = (val: string) => {
+    setClientName(val);
+    const found = freelancePastClients.find(c => c.name.toLowerCase() === val.toLowerCase());
+    if (found) {
+      if (found.phone) setClientPhone(found.phone);
+      if (found.address) setClientAddress(found.address);
+    }
+  };
+
+  // Gestión de Partidas
   const handleItemChange = (index: number, field: string, value: any) => {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
-    
-    // Si elige un concepto guardado, autocompletar precio
     if (field === 'concept') {
       const found = savedConcepts.find(c => c.name === value);
       if (found) newItems[index].price = found.default_price;
@@ -86,7 +101,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const removeItem = (index: number) => setItems(items.filter((_, i) => i !== index));
   const calculateTotal = () => items.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
 
-  // Subir Archivos a Supabase Storage
+  // Subir Archivos a Supabase
   const uploadFiles = async (workId: string) => {
     const uploadedUrls = [];
     for (const file of files) {
@@ -107,34 +122,46 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     const total = calculateTotal();
 
     if (items.some(i => !i.concept)) return alert('Rellena el nombre de todos los conceptos.');
-    if (isAdmin && !selectedWorker) return alert('Selecciona el operario.');
+    if (clientMode === 'crm' && !selectedClientId) return alert('Selecciona un cliente del CRM.');
+    if (clientMode === 'new' && !clientName) return alert('El nombre del cliente es obligatorio.');
     
     setIsSubmitting(true);
     try {
       let organizationId = user.id;
-      let workerId = isAdmin ? selectedWorker : user.id;
-
+      
       if (!isAdmin) {
         const { data: adminData } = await supabase.from('profiles').select('id').eq('company', profile?.company).eq('role', 'admin').single();
         organizationId = adminData?.id || user.id;
       }
 
-      // 1. Guardar conceptos nuevos para el futuro
+      // Guardar conceptos nuevos
       for (const item of items) {
         if (!savedConcepts.find(c => c.name === item.concept)) {
           await supabase.from('work_concepts').insert({ organization_id: organizationId, name: item.concept, default_price: item.price });
         }
       }
 
-      // 2. Crear el Parte
+      // Nombres y teléfonos dependiendo de si usa CRM o Manual
+      let finalClientName = clientName;
+      let finalClientPhone = clientPhone;
+      let finalClientAddress = clientAddress;
+      
+      if (clientMode === 'crm' && isAdmin) {
+        const crmC = crmClients.find(c => c.id === selectedClientId);
+        finalClientName = crmC?.name || '';
+        finalClientPhone = crmC?.phone || '';
+        finalClientAddress = crmC?.address || '';
+      }
+
+      // Crear Parte (el worker_id siempre es el usuario que lo crea)
       const { data: newWork, error } = await supabase.from('freelance_works').insert({
         organization_id: organizationId,
-        worker_id: workerId,
-        client_id: clientMode === 'crm' ? selectedClientId : null,
-        client_name: clientMode === 'crm' ? crmClients.find(c=>c.id===selectedClientId)?.name : clientName,
-        client_phone: clientMode === 'new' ? clientPhone : null,
-        client_address: clientMode === 'new' ? clientAddress : null,
-        title: `Parte de Trabajo - ${new Date().toLocaleDateString()}`,
+        worker_id: user.id,
+        client_id: clientMode === 'crm' && isAdmin ? selectedClientId : null,
+        client_name: finalClientName,
+        client_phone: finalClientPhone,
+        client_address: finalClientAddress,
+        title: `Parte - ${finalClientName} - ${new Date().toLocaleDateString()}`,
         description,
         price: total,
         items,
@@ -143,7 +170,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
 
       if (error) throw error;
 
-      // 3. Subir Archivos y actualizar el parte
+      // Subir Archivos
       if (files.length > 0 && newWork) {
         const urls = await uploadFiles(newWork.id);
         await supabase.from('freelance_works').update({ attachments: urls }).eq('id', newWork.id);
@@ -172,6 +199,13 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
   if (isLoading) return <div className="p-8 text-center font-bold">Cargando...</div>;
 
+  // Helpers para limpiar teléfonos para los enlaces
+  const getCleanPhone = (phone: string) => phone ? phone.replace(/[^0-9+]/g, '') : '';
+  const getWaPhone = (phone: string) => {
+    const p = phone.replace(/[^0-9]/g, '');
+    return p.length === 9 ? `34${p}` : p; // Añade +34 por defecto si tiene 9 cifras
+  };
+
   return (
     <div className="p-4 sm:p-6 pb-24 max-w-4xl mx-auto space-y-6">
       {/* Cabecera */}
@@ -190,35 +224,31 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       {view === 'new' ? (
         <form onSubmit={handleSubmit} className="bg-white p-6 rounded-2xl shadow-sm border space-y-6">
           
-          {/* SECCIÓN OPERARIO */}
-          {isAdmin && (
-            <div className="bg-slate-50 p-4 rounded-xl border">
-              <label className="block text-xs font-bold uppercase mb-1">Operario asignado</label>
-              <select value={selectedWorker} onChange={e => setSelectedWorker(e.target.value)} className="w-full p-2 rounded-lg border" required>
-                <option value="">Selecciona operario...</option>
-                {team.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
-          )}
-
           {/* SECCIÓN CLIENTE */}
           <div className="space-y-4">
             <h3 className="font-bold border-b pb-2">Datos del Cliente</h3>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setClientMode('crm')} className={`flex-1 py-2 rounded-lg font-bold text-sm ${clientMode==='crm'?'bg-indigo-100 text-indigo-700':'bg-slate-100'}`}>De CRM</button>
-              <button type="button" onClick={() => setClientMode('new')} className={`flex-1 py-2 rounded-lg font-bold text-sm ${clientMode==='new'?'bg-indigo-100 text-indigo-700':'bg-slate-100'}`}>Nuevo / Manual</button>
-            </div>
             
-            {clientMode === 'crm' ? (
+            {/* Solo el admin ve el selector entre CRM y Manual */}
+            {isAdmin && (
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setClientMode('crm')} className={`flex-1 py-2 rounded-lg font-bold text-sm ${clientMode==='crm'?'bg-indigo-100 text-indigo-700':'bg-slate-100'}`}>De CRM</button>
+                <button type="button" onClick={() => setClientMode('new')} className={`flex-1 py-2 rounded-lg font-bold text-sm ${clientMode==='new'?'bg-indigo-100 text-indigo-700':'bg-slate-100'}`}>Nuevo / Manual</button>
+              </div>
+            )}
+            
+            {clientMode === 'crm' && isAdmin ? (
               <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} className="w-full p-3 rounded-xl border bg-slate-50" required>
                 <option value="">Seleccionar cliente del CRM...</option>
                 {crmClients.map(c => <option key={c.id} value={c.id}>{c.name} - {c.address}</option>)}
               </select>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input type="text" placeholder="Nombre completo" value={clientName} onChange={e=>setClientName(e.target.value)} className="p-3 border rounded-xl" required />
+                <datalist id="past-clients-list">
+                  {freelancePastClients.map((c, i) => <option key={i} value={c.name} />)}
+                </datalist>
+                <input type="text" list="past-clients-list" placeholder="Nombre completo" value={clientName} onChange={e=>handleClientNameChange(e.target.value)} className="p-3 border rounded-xl" required />
                 <input type="tel" placeholder="Teléfono" value={clientPhone} onChange={e=>setClientPhone(e.target.value)} className="p-3 border rounded-xl" />
-                <input type="text" placeholder="Dirección completa" value={clientAddress} onChange={e=>setClientAddress(e.target.value)} className="p-3 border rounded-xl md:col-span-2" />
+                <input type="text" placeholder="Dirección completa (Para el mapa)" value={clientAddress} onChange={e=>setClientAddress(e.target.value)} className="p-3 border rounded-xl md:col-span-2" />
               </div>
             )}
           </div>
@@ -254,7 +284,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
             
             <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center bg-slate-50">
               <input type="file" multiple accept="image/*,video/*,audio/*,.pdf" onChange={e => { if(e.target.files) setFiles(Array.from(e.target.files)) }} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" />
-              <p className="text-xs text-slate-400 mt-2">Sube fotos de la obra, audios o documentos PDF.</p>
+              <p className="text-xs text-slate-400 mt-2">Sube fotos de la obra, notas de voz o documentos.</p>
             </div>
           </div>
 
@@ -263,15 +293,15 @@ export default function FreelanceWorksView({ user }: { user: any }) {
           </button>
         </form>
       ) : (
-        /* LISTADO DE TRABAJOS */
+        /* LISTADO DE TRABAJOS CON BOTONES DE ACCIÓN */
         <div className="space-y-4">
           {works.map(work => (
             <div key={work.id} className="bg-white p-5 rounded-2xl shadow-sm border flex flex-col gap-3">
               <div className="flex justify-between items-start">
                 <div>
                   <h4 className="font-black text-slate-800">{work.client_name || 'Cliente sin nombre'}</h4>
-                  <p className="text-xs text-slate-500">📍 {work.client_address || 'Sin dirección'}</p>
-                  {isAdmin && <p className="text-xs font-bold text-indigo-600 mt-1">👤 Operario: {work.worker?.name}</p>}
+                  {work.client_address && <p className="text-xs text-slate-500">📍 {work.client_address}</p>}
+                  {isAdmin && <p className="text-xs font-bold text-indigo-600 mt-1">👤 Creado por: {work.worker?.name}</p>}
                 </div>
                 <div className="text-right">
                   <span className="text-xl font-black">{Number(work.price).toFixed(2)} €</span>
@@ -281,6 +311,41 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                 </div>
               </div>
               
+              {/* BOTONES DE ACCIÓN RÁPIDA */}
+              <div className="grid grid-cols-4 gap-2 border-y border-slate-100 py-3 my-1">
+                <a 
+                  href={work.client_address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(work.client_address)}` : '#'} 
+                  target="_blank" rel="noreferrer"
+                  className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-xs font-bold transition-colors ${work.client_address ? 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100' : 'bg-slate-50 text-slate-300 pointer-events-none'}`}
+                >
+                  <span className="text-lg">🗺️</span> Ir
+                </a>
+                
+                <a 
+                  href={work.client_phone ? `tel:${getCleanPhone(work.client_phone)}` : '#'} 
+                  className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-xs font-bold transition-colors ${work.client_phone ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-slate-50 text-slate-300 pointer-events-none'}`}
+                >
+                  <span className="text-lg">📞</span> Llamar
+                </a>
+                
+                <a 
+                  href={work.client_phone ? `https://wa.me/${getWaPhone(work.client_phone)}` : '#'} 
+                  target="_blank" rel="noreferrer"
+                  className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-xs font-bold transition-colors ${work.client_phone ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'bg-slate-50 text-slate-300 pointer-events-none'}`}
+                >
+                  <span className="text-lg">💬</span> WhatsApp
+                </a>
+                
+                <a 
+                  href={work.client_phone ? `https://t.me/+${getWaPhone(work.client_phone)}` : '#'} 
+                  target="_blank" rel="noreferrer"
+                  className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl text-xs font-bold transition-colors ${work.client_phone ? 'bg-sky-50 text-sky-700 hover:bg-sky-100' : 'bg-slate-50 text-slate-300 pointer-events-none'}`}
+                >
+                  <span className="text-lg">✈️</span> Telegram
+                </a>
+              </div>
+              
+              {/* Resumen de Partidas */}
               <div className="bg-slate-50 p-3 rounded-lg text-sm border">
                 <p className="font-bold text-slate-700 mb-1">Partidas:</p>
                 <ul className="list-disc pl-4 text-slate-600">
@@ -288,22 +353,31 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                     <li key={i}>{item.quantity}x {item.concept} - {item.price}€</li>
                   ))}
                 </ul>
+                {work.description && (
+                  <p className="mt-2 text-xs text-slate-500 italic border-t pt-2">"{work.description}"</p>
+                )}
               </div>
 
+              {/* Adjuntos */}
               {work.attachments?.length > 0 && (
                 <div className="flex gap-2 flex-wrap">
                   {work.attachments.map((url:string, i:number) => (
-                    <a key={i} href={url} target="_blank" rel="noreferrer" className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full font-bold">Ver Adjunto {i+1}</a>
+                    <a key={i} href={url} target="_blank" rel="noreferrer" className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg font-bold border border-indigo-100">
+                      📎 Ver Archivo {i+1}
+                    </a>
                   ))}
                 </div>
               )}
 
+              {/* Acciones de Gerente */}
               {isAdmin && work.status !== 'pagado' && (
-                <select className="text-xs font-bold bg-slate-100 border p-2 rounded-lg mt-2" value={work.status} onChange={(e) => updateStatus(work.id, e.target.value)}>
-                  <option value="pendiente_revision">Pendiente</option>
-                  <option value="aprobado">Aprobar</option>
-                  <option value="pagado">Marcar Pagado</option>
-                </select>
+                <div className="flex justify-end border-t pt-3 mt-1">
+                  <select className="text-xs font-bold bg-white border border-slate-300 shadow-sm p-2 rounded-lg" value={work.status} onChange={(e) => updateStatus(work.id, e.target.value)}>
+                    <option value="pendiente_revision">Pendiente de Revisión</option>
+                    <option value="aprobado">Aprobar (Falta pagar)</option>
+                    <option value="pagado">💰 Marcar Pagado</option>
+                  </select>
+                </div>
               )}
             </div>
           ))}
