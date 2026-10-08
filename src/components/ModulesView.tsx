@@ -68,7 +68,7 @@ export default function ModulesView({ onOpenModule }: ModulesViewProps) {
           <ModuleCard 
             title="Partes de Trabajo" 
             icon="🏗️" 
-            onClick={() => alert('Abrir Partes de Obras (Próximo paso)')} 
+           onClick={() => onOpenModule('works')} 
           />
         )}
 

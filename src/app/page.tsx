@@ -10,7 +10,8 @@ import TrackingView from '@/components/TrackingView';
 import DocumentsView from '@/components/DocumentsView';
 import ProfileView from '@/components/ProfileView';
 import AdminDashboardView from '@/components/AdminDashboardView';
-import ModulesView from '@/components/ModulesView'; // <-- Añadimos ModulesView
+import ModulesView from '@/components/ModulesView'; 
+import FreelanceWorksView from '@/components/FreelanceWorksView'; // <-- Añadimos FreelanceWorksView
 
 // Importamos los módulos de Layout
 import Header from '@/components/layout/Header';
@@ -26,8 +27,8 @@ interface MainAppViewProps {
 function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps) {
   const getDefaultTab = () => user.role === 'sales_rep' ? 'tracking' : 'chat';
   
-  // Añadimos 'modules' a los tipos permitidos
-  const [activeTab, setActiveTab] = useState<'chat'|'calendar'|'tracking'|'modules'|'documents'|'tu'>(getDefaultTab());
+  // Añadimos 'works' a los tipos permitidos
+  const [activeTab, setActiveTab] = useState<'chat'|'calendar'|'tracking'|'modules'|'documents'|'works'|'tu'>(getDefaultTab());
   const displayRole = isAdmin ? 'supplier_owner' : user.role;
   
   const tabHistoryRef = useRef<string[]>([getDefaultTab()]);
@@ -95,16 +96,20 @@ function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps)
           {activeTab === 'chat' && <ChatView user={user} />}
           {activeTab === 'calendar' && <CalendarView user={user} />}
           {activeTab === 'tracking' && <TrackingView user={user} />}
-          {/* Aquí inyectamos el nuevo Centro de Módulos */}
+          
+          {/* Aquí están las rutas del Centro de Módulos y sus sub-herramientas */}
           {activeTab === 'modules' && <ModulesView onOpenModule={handleTabChange} />} 
           {activeTab === 'documents' && <DocumentsView user={user} />}
+          {activeTab === 'works' && <FreelanceWorksView user={user} />}
+          
           {activeTab === 'tu' && <ProfileView user={user} />}
         </div>
       </main>
 
       {/* 3. COMPONENTE MODULAR NAVEGACIÓN INFERIOR */}
       <BottomNav 
-        activeTab={activeTab === 'documents' ? 'modules' : activeTab} // Si está en documents, mantiene iluminado el icono de módulos
+        // Mantiene iluminado el icono de módulos si estás en alguna de sus sub-herramientas
+        activeTab={['documents', 'works'].includes(activeTab) ? 'modules' : activeTab} 
         displayRole={displayRole} 
         onTabChange={handleTabChange} 
       />
