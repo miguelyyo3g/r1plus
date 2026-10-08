@@ -18,7 +18,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonths, setSelectedMonths] = useState<number[]>([-1]);
 
-  // Gastos Rápidos (Botón Rojo)
   const [expenseWorkId, setExpenseWorkId] = useState<string | null>(null);
   const [expenseCategory, setExpenseCategory] = useState('material');
   const [expenseConcept, setExpenseConcept] = useState('');
@@ -283,6 +282,23 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     }
   };
 
+  // NUEVA FUNCIÓN: Eliminar Parte
+  const deleteWork = async (workId: string) => {
+    const isConfirmed = window.confirm("⚠️ ¿Estás completamente seguro de que quieres eliminar este parte de trabajo? Esta acción no se puede deshacer y se borrarán todos los datos, partidas y gastos asociados.");
+    if (!isConfirmed) return;
+
+    try {
+      const { error } = await supabase.from('freelance_works').delete().eq('id', workId);
+      if (error) throw error;
+      
+      alert('Parte eliminado correctamente.');
+      resetForm();
+      loadData();
+    } catch (error: any) {
+      alert('Error al eliminar: ' + error.message);
+    }
+  };
+
   const resetForm = () => {
     setView('list'); setEditingId(null);
     setItems([{ concept: '', quantity: 1, price: 0 }]); 
@@ -358,7 +374,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const totalTerminado = worksFiltered.filter(w => w.status === 'aprobado' || w.status === 'pagado').reduce((sum, w) => sum + Number(w.price || 0), 0);
   const totalCobrado = worksFiltered.filter(w => w.status === 'pagado').reduce((sum, w) => sum + Number(w.price || 0), 0);
 
-  // Calcular desglose de gastos
   let gastosGasolina = 0;
   let gastosComida = 0;
   let gastosMaterial = 0;
@@ -370,7 +385,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
         if (exp.category === 'gasolina') gastosGasolina += amt;
         else if (exp.category === 'comida') gastosComida += amt;
         else if (exp.category === 'material') gastosMaterial += amt;
-        else gastosMaterial += amt; // Compatibilidad si no tenían categoría asignada
+        else gastosMaterial += amt; 
       });
     }
   });
@@ -419,17 +434,20 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                   <p className="text-xs font-bold text-slate-500 uppercase">Partes</p>
                   <p className="text-lg font-black text-slate-800">{totalImporte.toFixed(2)}€</p>
                 </div>
+                <div className="p-4 text-center bg-rose-50/30">
+                  <p className="text-xs font-bold text-rose-400 uppercase">Gastos Extra</p>
+                  <p className="text-lg font-black text-rose-600">-{totalGastos.toFixed(2)}€</p>
+                </div>
                 <div className="p-4 text-center bg-indigo-50/30">
                   <p className="text-xs font-bold text-indigo-400 uppercase">Terminado</p>
                   <p className="text-lg font-black text-indigo-700">{totalTerminado.toFixed(2)}€</p>
                 </div>
-                <div className="p-4 text-center col-span-2 bg-emerald-50/30">
+                <div className="p-4 text-center col-span-2 bg-emerald-50/30 rounded-b-2xl">
                   <p className="text-xs font-bold text-emerald-500 uppercase">Total Cobrado</p>
                   <p className="text-2xl font-black text-emerald-700">{totalCobrado.toFixed(2)}€</p>
                 </div>
               </div>
 
-              {/* DESGLOSE DE GASTOS */}
               <div className="bg-rose-50/40 p-4 border-t w-full">
                 <p className="text-xs font-bold text-rose-500 uppercase mb-2 text-center">Desglose de Gastos (-{totalGastos.toFixed(2)}€)</p>
                 <div className="grid grid-cols-3 gap-2 text-center divide-x divide-rose-200">
@@ -509,7 +527,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                       <span className={`px-3 py-1.5 text-xs sm:text-sm font-black rounded-xl uppercase self-start ${isUnread ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
                         {work.status.replace('_', ' ')}
                       </span>
-                      {work.expenses > 0 && <span className="text-[10px] font-black text-rose-600 ml-1">Gastos: -{work.expenses}€</span>}
                     </div>
                     
                     <div className="flex flex-wrap gap-2 w-full sm:w-auto justify-end">
@@ -521,7 +538,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                         </>
                       )}
                       
-                      {/* BOTÓN ROJO RECUPERADO */}
                       <button onClick={() => { setExpenseWorkId(work.id); setExpenseConcept(''); setExpenseValue(''); setExpenseCategory('material'); }} className="w-10 h-10 flex items-center justify-center rounded-xl bg-rose-100 text-rose-600 text-sm font-black shadow-sm">
                         +🔴
                       </button>
@@ -531,7 +547,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                     </div>
                   </div>
 
-                  {/* PANEL RÁPIDO DE GASTOS DESDE LA LISTA */}
                   {expenseWorkId === work.id && (
                     <div className="mt-3 p-4 bg-rose-50 border border-rose-200 rounded-xl w-full flex flex-col gap-3">
                       <p className="text-sm font-black text-rose-700">Añadir Gasto Rápido</p>
@@ -606,7 +621,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
             </datalist>
             {items.map((item, index) => (
               <div key={index} className="flex flex-col sm:flex-row gap-3 bg-emerald-50/30 p-3 rounded-xl border border-emerald-100 w-full">
-                <input list="saved-concepts" placeholder="Concepto (Ej: Instalación puerta)" value={item.concept} onChange={e=>handleItemChange(index, 'concept', e.target.value)} className="flex-1 p-3 text-sm border border-emerald-200 rounded-lg w-full font-bold" required />
+                <input list="saved-concepts" placeholder="Concepto del trabajo" value={item.concept} onChange={e=>handleItemChange(index, 'concept', e.target.value)} className="flex-1 p-3 text-sm border border-emerald-200 rounded-lg w-full font-bold" required />
                 <div className="flex gap-2 w-full sm:w-auto">
                   <input type="number" min="1" placeholder="Uds" value={item.quantity} onChange={e=>handleItemChange(index, 'quantity', e.target.value)} className="w-20 p-3 text-base font-black border border-emerald-200 rounded-lg text-center" required />
                   <input type="number" step="0.01" placeholder="Precio" value={item.price} onChange={e=>handleItemChange(index, 'price', e.target.value)} className="w-24 p-3 text-base font-black border border-emerald-200 rounded-lg text-center" required />
@@ -614,7 +629,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                 </div>
               </div>
             ))}
-            <button type="button" onClick={addItem} className="text-sm font-black text-emerald-700 px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-lg inline-block mt-2">+ Añadir partida</button>
+            <button type="button" onClick={addItem} className="text-sm font-black text-emerald-700 px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-lg inline-block mt-2">+ Añadir otra partida</button>
           </div>
 
           <div className="bg-slate-50 p-4 rounded-xl border space-y-3 mt-4">
@@ -642,7 +657,6 @@ export default function FreelanceWorksView({ user }: { user: any }) {
             </div>
           )}
 
-          {/* LISTA DE GASTOS ESCONDIDA DEBAJO DEL ESTADO */}
           <div className="space-y-4 pt-4 border-t border-slate-200 mt-6">
             <h3 className="font-bold text-base flex justify-between items-center text-rose-600">
               Gastos Registrados
@@ -671,6 +685,14 @@ export default function FreelanceWorksView({ user }: { user: any }) {
           <button type="submit" disabled={isSubmitting} className="w-full py-4 mt-6 bg-indigo-600 text-white rounded-xl font-black text-lg shadow-lg hover:bg-indigo-700 active:scale-95 transition-all">
             {isSubmitting ? 'Guardando información...' : 'Guardar y Cerrar Parte'}
           </button>
+
+          {/* BOTÓN DE ELIMINAR PARTE (SOLO ADMINS EN MODO EDICIÓN) */}
+          {isAdmin && editingId && (
+            <button type="button" onClick={() => deleteWork(editingId)} className="w-full py-3 mt-2 bg-white border border-rose-200 text-rose-600 rounded-xl font-bold text-sm hover:bg-rose-50 transition-all">
+              🗑️ Eliminar Parte de Trabajo Definitivamente
+            </button>
+          )}
+
         </form>
       )}
     </div>
