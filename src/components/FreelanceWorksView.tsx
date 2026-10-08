@@ -18,7 +18,9 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonths, setSelectedMonths] = useState<number[]>([-1]);
 
+  // Gastos detallados (Fuera del formulario)
   const [expenseWorkId, setExpenseWorkId] = useState<string | null>(null);
+  const [expenseConcept, setExpenseConcept] = useState('');
   const [expenseValue, setExpenseValue] = useState('');
 
   const [clientMode, setClientMode] = useState<'crm' | 'new'>('new');
@@ -238,10 +240,29 @@ export default function FreelanceWorksView({ user }: { user: any }) {
     }
   };
 
-  const saveExpense = async (workId: string) => {
+  // NUEVA FUNCIÓN DE GUARDADO DETALLADO DE GASTOS
+  const saveExpense = async (work: any) => {
+    if (!expenseConcept || !expenseValue) return alert('Debes poner el concepto y el importe del gasto.');
+    
+    const amount = parseFloat(expenseValue);
+    if (isNaN(amount) || amount <= 0) return alert('Importe no válido.');
+
+    const newExpenseDetail = { concept: expenseConcept, amount: amount.toFixed(2), date: new Date().toISOString() };
+    const currentDetails = work.expenses_details || [];
+    const updatedDetails = [...currentDetails, newExpenseDetail];
+    
+    const currentTotal = parseFloat(work.expenses || '0');
+    const newTotal = (currentTotal + amount).toFixed(2);
+
     try {
-      await supabase.from('freelance_works').update({ expenses: parseFloat(expenseValue || '0') }).eq('id', workId);
+      await supabase.from('freelance_works').update({ 
+        expenses: newTotal,
+        expenses_details: updatedDetails
+      }).eq('id', work.id);
+      
       setExpenseWorkId(null);
+      setExpenseConcept('');
+      setExpenseValue('');
       loadData();
     } catch (error: any) {
       alert('Error guardando gasto: ' + error.message);
@@ -298,7 +319,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   };
 
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
-  if (isLoading) return <div className="p-8 text-center font-bold">Cargando...</div>;
+  if (isLoading) return <div className="p-8 text-center font-bold text-lg">Cargando...</div>;
 
   const getWaPhone = (phone: string) => {
     const p = phone?.replace(/[^0-9]/g, '') || '';
@@ -328,71 +349,71 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       
       <div className="bg-white p-4 rounded-2xl shadow-sm border flex justify-between items-center">
         <div>
-          <h2 className="text-xl font-black">🏗️ Partes</h2>
+          <h2 className="text-xl font-black text-slate-800">🏗️ Partes</h2>
         </div>
         {view === 'list' ? (
-          <button onClick={() => {resetForm(); setView('form');}} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-sm text-sm">+ Nuevo</button>
+          <button onClick={() => {resetForm(); setView('form');}} className="px-5 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-sm text-sm">+ Nuevo Parte</button>
         ) : (
-          <button onClick={resetForm} className="px-4 py-2 bg-slate-100 font-bold rounded-xl text-sm">Volver</button>
+          <button onClick={resetForm} className="px-5 py-3 bg-slate-100 font-bold rounded-xl text-sm">Volver</button>
         )}
       </div>
 
       {view === 'list' && (
         <>
-          <button onClick={() => setShowStats(!showStats)} className="w-full bg-white p-3 rounded-2xl shadow-sm border font-bold text-slate-700 flex justify-between items-center">
+          <button onClick={() => setShowStats(!showStats)} className="w-full bg-white p-4 rounded-2xl shadow-sm border font-black text-slate-700 flex justify-between items-center text-base">
             <span>📊 Estadísticas y Filtros</span>
             <span>{showStats ? '🔼' : '🔽'}</span>
           </button>
 
           {showStats && (
-            <div className="bg-white rounded-2xl shadow-sm border overflow-hidden w-full text-sm transition-all">
+            <div className="bg-white rounded-2xl shadow-sm border overflow-hidden w-full text-base transition-all">
               <div className="bg-slate-50 border-b p-3 flex justify-between items-center">
-                <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} className="text-xs font-bold p-1.5 rounded-lg border outline-none bg-white">
+                <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} className="text-sm font-bold p-2 rounded-lg border outline-none bg-white">
                   <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>
                   <option value={new Date().getFullYear() - 1}>{new Date().getFullYear() - 1}</option>
                 </select>
               </div>
               
-              <div className="p-2 bg-white border-b flex gap-1 overflow-x-auto w-full scrollbar-hide">
-                <button onClick={() => toggleMonth(-1)} className={`px-2 py-1 rounded-full text-xs font-bold border whitespace-nowrap transition-colors ${selectedMonths.includes(-1) ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-600'}`}>Todos</button>
+              <div className="p-3 bg-white border-b flex gap-2 overflow-x-auto w-full scrollbar-hide">
+                <button onClick={() => toggleMonth(-1)} className={`px-4 py-2 rounded-full text-sm font-bold border whitespace-nowrap transition-colors ${selectedMonths.includes(-1) ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-600'}`}>Todos</button>
                 {monthsNames.map((m, i) => (
-                  <button key={i} onClick={() => toggleMonth(i)} className={`px-2 py-1 rounded-full text-xs font-bold border whitespace-nowrap transition-colors ${selectedMonths.includes(i) ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-600'}`}>{m}</button>
+                  <button key={i} onClick={() => toggleMonth(i)} className={`px-4 py-2 rounded-full text-sm font-bold border whitespace-nowrap transition-colors ${selectedMonths.includes(i) ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-600'}`}>{m}</button>
                 ))}
               </div>
 
               <div className="grid grid-cols-2 divide-x divide-y border-b w-full">
-                <div className="p-3 text-center bg-blue-50/30">
-                  <p className="text-[10px] font-bold text-slate-500 uppercase">Partes</p>
-                  <p className="text-sm font-black text-slate-800">{totalImporte.toFixed(2)}€</p>
+                <div className="p-4 text-center bg-blue-50/30">
+                  <p className="text-xs font-bold text-slate-500 uppercase">Partes</p>
+                  <p className="text-lg font-black text-slate-800">{totalImporte.toFixed(2)}€</p>
                 </div>
-                <div className="p-3 text-center bg-rose-50/30">
-                  <p className="text-[10px] font-bold text-rose-400 uppercase">Gastos Extra</p>
-                  <p className="text-sm font-black text-rose-600">-{totalGastos.toFixed(2)}€</p>
+                <div className="p-4 text-center bg-rose-50/30">
+                  <p className="text-xs font-bold text-rose-400 uppercase">Gastos Extra</p>
+                  <p className="text-lg font-black text-rose-600">-{totalGastos.toFixed(2)}€</p>
                 </div>
-                <div className="p-3 text-center bg-indigo-50/30">
-                  <p className="text-[10px] font-bold text-indigo-400 uppercase">Terminado</p>
-                  <p className="text-sm font-black text-indigo-700">{totalTerminado.toFixed(2)}€</p>
+                <div className="p-4 text-center bg-indigo-50/30">
+                  <p className="text-xs font-bold text-indigo-400 uppercase">Terminado</p>
+                  <p className="text-lg font-black text-indigo-700">{totalTerminado.toFixed(2)}€</p>
                 </div>
-                <div className="p-3 text-center bg-emerald-50/30 rounded-b-2xl">
-                  <p className="text-[10px] font-bold text-emerald-500 uppercase">Total Cobrado</p>
-                  <p className="text-lg font-black text-emerald-700">{totalCobrado.toFixed(2)}€</p>
+                <div className="p-4 text-center bg-emerald-50/30 rounded-b-2xl">
+                  <p className="text-xs font-bold text-emerald-500 uppercase">Total Cobrado</p>
+                  <p className="text-2xl font-black text-emerald-700">{totalCobrado.toFixed(2)}€</p>
                 </div>
               </div>
             </div>
           )}
 
-          <div className="flex gap-2 bg-slate-200/50 p-1 rounded-xl">
-            <button onClick={() => setListTab('activos')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${listTab === 'activos' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:bg-slate-200'}`}>
+          <div className="flex gap-2 bg-slate-200/50 p-2 rounded-xl">
+            <button onClick={() => setListTab('activos')} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${listTab === 'activos' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:bg-slate-200'}`}>
               En Marcha ({activosList.length})
             </button>
-            <button onClick={() => setListTab('terminados')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${listTab === 'terminados' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:bg-slate-200'}`}>
+            <button onClick={() => setListTab('terminados')} className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${listTab === 'terminados' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:bg-slate-200'}`}>
               Terminados ({terminadosListFiltered.length})
             </button>
           </div>
 
-          <div className="space-y-3 w-full">
+          <div className="space-y-4 w-full">
             {(listTab === 'activos' ? activosList : terminadosListFiltered).length === 0 && (
-              <p className="text-center text-slate-400 text-sm py-4">No hay partes en esta carpeta.</p>
+              <p className="text-center text-slate-500 font-medium text-base py-6">No hay partes en esta carpeta.</p>
             )}
 
             {(listTab === 'activos' ? activosList : terminadosListFiltered).map((work, index, array) => {
@@ -407,68 +428,85 @@ export default function FreelanceWorksView({ user }: { user: any }) {
               }
               
               return (
-                <div key={work.id} className={`p-3 rounded-xl shadow-sm border flex gap-2 relative w-full overflow-hidden transition-all ${isUnread ? 'bg-red-50 border-red-300' : 'bg-white border-slate-200'}`}>
+                <div key={work.id} className={`p-4 rounded-2xl shadow-sm border flex flex-col gap-3 relative w-full overflow-hidden transition-all ${isUnread ? 'bg-red-50 border-red-300' : 'bg-white border-slate-200'}`}>
                   
-                  {listTab === 'activos' && (
-                    <div className="flex flex-col justify-center gap-1 border-r border-slate-100 pr-2">
-                      <button onClick={() => moveWork(index, 'up', array)} disabled={index === 0} className={`p-1 rounded bg-slate-100 text-xs ${index === 0 ? 'opacity-30' : 'active:bg-slate-200'}`}>🔼</button>
-                      <button onClick={() => moveWork(index, 'down', array)} disabled={index === array.length - 1} className={`p-1 rounded bg-slate-100 text-xs ${index === array.length - 1 ? 'opacity-30' : 'active:bg-slate-200'}`}>🔽</button>
+                  {/* Flechas y Título unificados para mejor lectura */}
+                  <div className="flex justify-between items-start w-full gap-3">
+                    {listTab === 'activos' && (
+                      <div className="flex flex-col justify-center gap-1">
+                        <button onClick={() => moveWork(index, 'up', array)} disabled={index === 0} className={`w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 text-sm ${index === 0 ? 'opacity-30' : 'active:bg-slate-200'}`}>🔼</button>
+                        <button onClick={() => moveWork(index, 'down', array)} disabled={index === array.length - 1} className={`w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 text-sm ${index === array.length - 1 ? 'opacity-30' : 'active:bg-slate-200'}`}>🔽</button>
+                      </div>
+                    )}
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-start">
+                        <h4 className="font-black text-slate-800 text-base sm:text-lg leading-tight flex-1">{work.client_name || 'Sin nombre'}</h4>
+                        {isUnread && <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse ml-2 flex-shrink-0 mt-1"></span>}
+                      </div>
+                      <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                        📍 {work.client_street ? `${work.client_street} ${work.client_number || ''}` : (work.client_address || 'Sin dirección')}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Notas */}
+                  {work.description && (
+                    <p className="text-sm text-slate-700 mt-1 line-clamp-3 italic border-l-4 border-indigo-200 pl-3 bg-indigo-50/50 py-1">
+                      {work.description}
+                    </p>
+                  )}
+
+                  {/* ZONA DE GASTOS DETALLADOS DENTRO DE LA TARJETA */}
+                  {work.expenses_details?.length > 0 && (
+                    <div className="mt-2 text-sm text-rose-700 bg-rose-50/50 border border-rose-100 rounded-lg p-3">
+                      <p className="font-bold mb-1">Gastos Registrados:</p>
+                      <ul className="list-disc pl-5 text-rose-600 space-y-1">
+                        {work.expenses_details.map((g:any, i:number) => (
+                          <li key={i}><span className="font-semibold">{g.concept}</span>: -{g.amount}€</li>
+                        ))}
+                      </ul>
+                      <p className="font-black text-rose-800 mt-2 text-base border-t border-rose-200 pt-1">Total Gastos: -{work.expenses}€</p>
                     </div>
                   )}
 
-                  <div className="flex-1 min-w-0 flex flex-col justify-between">
-                    <div>
-                      <div className="flex justify-between items-start">
-                        <h4 className="font-black text-slate-800 text-sm truncate flex-1">{work.client_name || 'Sin nombre'}</h4>
-                        {isUnread && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse ml-2 flex-shrink-0 mt-1"></span>}
-                      </div>
-                      <p className="text-[10px] text-slate-500 truncate mt-0.5">
-                        📍 {work.client_street ? `${work.client_street} ${work.client_number || ''}` : (work.client_address || 'Sin dirección')}
-                      </p>
-                      
-                      {work.description && (
-                        <p className="text-xs text-slate-600 mt-1.5 line-clamp-2 italic border-l-2 border-slate-200 pl-2">
-                          {work.description}
-                        </p>
+                  {/* Acciones y Botones - AHORA MÁS GRANDES */}
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mt-2 pt-3 border-t border-slate-100 gap-3">
+                    
+                    <span className={`px-3 py-1.5 text-xs sm:text-sm font-black rounded-xl uppercase self-start ${isUnread ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
+                      {work.status.replace('_', ' ')}
+                    </span>
+                    
+                    <div className="flex flex-wrap gap-2 w-full sm:w-auto justify-end">
+                      <a href={mapUrl} target="_blank" rel="noreferrer" className="w-10 h-10 flex items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 text-base shadow-sm">🗺️</a>
+                      {work.client_phone && (
+                        <>
+                          <a href={`tel:${work.client_phone.replace(/[^0-9+]/g, '')}`} className="w-10 h-10 flex items-center justify-center rounded-xl bg-blue-50 text-blue-600 text-base shadow-sm">📞</a>
+                          <a href={`https://wa.me/${getWaPhone(work.client_phone)}`} target="_blank" rel="noreferrer" className="w-10 h-10 flex items-center justify-center rounded-xl bg-green-50 text-green-600 text-base shadow-sm">💬</a>
+                        </>
                       )}
-                    </div>
-
-                    <div className="flex justify-between items-end mt-3 pt-2 border-t border-slate-100/50">
-                      
-                      <div className="flex flex-col gap-1">
-                        <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full uppercase truncate self-start ${isUnread ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
-                          {work.status.replace('_', ' ')}
-                        </span>
-                        {work.expenses > 0 && <span className="text-[9px] font-bold text-rose-600 ml-1">Gastos: -{work.expenses}€</span>}
-                      </div>
-                      
-                      <div className="flex flex-col items-end gap-2">
-                        {expenseWorkId === work.id ? (
-                           <div className="flex gap-1">
-                             <input type="number" step="0.01" value={expenseValue} onChange={e => setExpenseValue(e.target.value)} placeholder="0.00" className="w-16 border p-1 text-xs rounded text-center" />
-                             <button onClick={() => saveExpense(work.id)} className="bg-rose-500 text-white text-xs px-2 py-1 rounded font-bold">OK</button>
-                             <button onClick={() => setExpenseWorkId(null)} className="bg-slate-200 text-slate-600 text-xs px-2 py-1 rounded font-bold">X</button>
-                           </div>
-                        ) : (
-                          <div className="flex gap-1">
-                            <a href={mapUrl} target="_blank" rel="noreferrer" className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 text-sm">🗺️</a>
-                            {work.client_phone && (
-                              <>
-                                <a href={`tel:${work.client_phone.replace(/[^0-9+]/g, '')}`} className="w-7 h-7 flex items-center justify-center rounded-lg bg-blue-50 text-blue-600 text-xs">📞</a>
-                                <a href={`https://wa.me/${getWaPhone(work.client_phone)}`} target="_blank" rel="noreferrer" className="w-7 h-7 flex items-center justify-center rounded-lg bg-green-50 text-green-600 text-xs">💬</a>
-                              </>
-                            )}
-                            <button onClick={() => { setExpenseWorkId(work.id); setExpenseValue(work.expenses ? String(work.expenses) : ''); }} className="w-7 h-7 flex items-center justify-center rounded-lg bg-rose-50 text-rose-600 text-xs font-black">
-                              +🔴
-                            </button>
-                            <button onClick={() => startEditing(work)} className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-bold ml-1">
-                              Abrir {isUnread ? '🔴' : ''}
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                      <button onClick={() => { setExpenseWorkId(work.id); setExpenseConcept(''); setExpenseValue(''); }} className="w-10 h-10 flex items-center justify-center rounded-xl bg-rose-100 text-rose-600 text-sm font-black shadow-sm">
+                        +🔴
+                      </button>
+                      <button onClick={() => startEditing(work)} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-black shadow-sm flex-1 sm:flex-none">
+                        Abrir {isUnread ? '🔴' : ''}
+                      </button>
                     </div>
                   </div>
+
+                  {/* CAJA DE NUEVO GASTO (Si está activo el botón +🔴) */}
+                  {expenseWorkId === work.id && (
+                    <div className="mt-3 p-4 bg-rose-50 border border-rose-200 rounded-xl w-full flex flex-col gap-3">
+                      <p className="text-sm font-black text-rose-700">Añadir Nuevo Gasto</p>
+                      <input type="text" value={expenseConcept} onChange={e => setExpenseConcept(e.target.value)} placeholder="Concepto (Ej: Material, Peaje...)" className="w-full p-3 text-sm font-medium rounded-lg border border-rose-200 outline-none focus:border-rose-400" />
+                      <div className="flex gap-2">
+                        <input type="number" step="0.01" value={expenseValue} onChange={e => setExpenseValue(e.target.value)} placeholder="Importe (€)" className="w-1/2 p-3 text-base font-black rounded-lg border border-rose-200 outline-none focus:border-rose-400" />
+                        <button onClick={() => saveExpense(work)} className="w-1/4 bg-rose-600 text-white font-black rounded-lg text-sm shadow-sm hover:bg-rose-700">OK</button>
+                        <button onClick={() => setExpenseWorkId(null)} className="w-1/4 bg-slate-200 text-slate-700 font-black rounded-lg text-sm hover:bg-slate-300">X</button>
+                      </div>
+                    </div>
+                  )}
+
                 </div>
               );
             })}
@@ -476,92 +514,93 @@ export default function FreelanceWorksView({ user }: { user: any }) {
         </>
       )}
 
-      {/* FORMULARIO */}
+      {/* FORMULARIO DE CREACIÓN */}
       {view === 'form' && (
-        <form onSubmit={handleSubmit} className="bg-white p-4 rounded-2xl shadow-sm border space-y-5 relative w-full">
-          <h3 className="font-bold border-b pb-2 text-indigo-700">{editingId ? '✏️ Editando Parte' : 'Nuevo Parte'}</h3>
+        <form onSubmit={handleSubmit} className="bg-white p-5 rounded-2xl shadow-sm border space-y-6 relative w-full">
+          <h3 className="font-black text-lg border-b pb-3 text-indigo-700">{editingId ? '✏️ Editando Parte' : 'Nuevo Parte'}</h3>
           
-          <div className="space-y-3">
+          <div className="space-y-4">
             {isAdmin && !editingId && (
               <div className="flex gap-2">
-                <button type="button" onClick={() => setClientMode('crm')} className={`flex-1 py-1.5 rounded-lg font-bold text-xs ${clientMode==='crm'?'bg-indigo-100 text-indigo-700':'bg-slate-100'}`}>De CRM</button>
-                <button type="button" onClick={() => setClientMode('new')} className={`flex-1 py-1.5 rounded-lg font-bold text-xs ${clientMode==='new'?'bg-indigo-100 text-indigo-700':'bg-slate-100'}`}>Manual</button>
+                <button type="button" onClick={() => setClientMode('crm')} className={`flex-1 py-3 rounded-xl font-black text-sm ${clientMode==='crm'?'bg-indigo-100 text-indigo-700 shadow-sm':'bg-slate-100 text-slate-600'}`}>De CRM</button>
+                <button type="button" onClick={() => setClientMode('new')} className={`flex-1 py-3 rounded-xl font-black text-sm ${clientMode==='new'?'bg-indigo-100 text-indigo-700 shadow-sm':'bg-slate-100 text-slate-600'}`}>Manual</button>
               </div>
             )}
 
             {clientMode === 'crm' && isAdmin ? (
-              <select value={selectedClientId} onChange={e => handleCrmSelect(e.target.value)} className="w-full p-2.5 text-sm rounded-xl border bg-slate-50" required>
+              <select value={selectedClientId} onChange={e => handleCrmSelect(e.target.value)} className="w-full p-3 text-base rounded-xl border bg-slate-50 font-medium" required>
                 <option value="">Seleccionar del CRM...</option>
                 {crmClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             ) : null}
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               <datalist id="past-clients-list">
                 {freelancePastClients.map((c, i) => <option key={i} value={c.name} />)}
               </datalist>
               
-              <input type="text" list="past-clients-list" placeholder="Nombre completo" value={clientName} onChange={e=>handleClientNameChange(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" required />
-              <input type="tel" placeholder="Teléfono" value={clientPhone} onChange={e=>setClientPhone(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" />
+              <input type="text" list="past-clients-list" placeholder="Nombre completo" value={clientName} onChange={e=>handleClientNameChange(e.target.value)} className="w-full p-3 text-base border rounded-xl font-bold" required />
+              <input type="tel" placeholder="Teléfono" value={clientPhone} onChange={e=>setClientPhone(e.target.value)} className="w-full p-3 text-base border rounded-xl font-medium" />
               
-              <p className="text-[10px] font-bold text-slate-500 uppercase mt-2">Dirección</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                <input type="text" placeholder="Calle / Avda" value={clientStreet} onChange={e=>setClientStreet(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl col-span-2" />
-                <input type="text" placeholder="Núm" value={clientNumber} onChange={e=>setClientNumber(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" />
-                <input type="text" placeholder="Piso" value={clientFloor} onChange={e=>setClientFloor(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl" />
-                <input type="text" placeholder="Población" value={clientCity} onChange={e=>setClientCity(e.target.value)} className="w-full p-2.5 text-sm border rounded-xl col-span-2" />
+              <p className="text-xs font-bold text-slate-500 uppercase mt-3">Dirección del Trabajo</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <input type="text" placeholder="Calle / Avda" value={clientStreet} onChange={e=>setClientStreet(e.target.value)} className="w-full p-3 text-sm border rounded-xl col-span-2 font-medium" />
+                <input type="text" placeholder="Núm" value={clientNumber} onChange={e=>setClientNumber(e.target.value)} className="w-full p-3 text-sm border rounded-xl font-medium" />
+                <input type="text" placeholder="Piso" value={clientFloor} onChange={e=>setClientFloor(e.target.value)} className="w-full p-3 text-sm border rounded-xl font-medium" />
+                <input type="text" placeholder="Población" value={clientCity} onChange={e=>setClientCity(e.target.value)} className="w-full p-3 text-sm border rounded-xl col-span-2 font-medium" />
               </div>
             </div>
           </div>
 
-          <div className="space-y-3">
-            <h3 className="font-bold border-b pb-1 text-sm flex justify-between items-center">
+          <div className="space-y-4">
+            <h3 className="font-bold border-b pb-2 text-base flex justify-between items-center">
               Partidas
-              <span className="text-lg text-indigo-600 font-black">{calculateTotal().toFixed(2)} €</span>
+              <span className="text-xl text-indigo-600 font-black">{calculateTotal().toFixed(2)} €</span>
             </h3>
             <datalist id="saved-concepts">
               {savedConcepts.map(c => <option key={c.id} value={c.name} />)}
             </datalist>
             {items.map((item, index) => (
-              <div key={index} className="flex flex-col sm:flex-row gap-2 bg-slate-50 p-2.5 rounded-xl border w-full">
-                <input list="saved-concepts" placeholder="Concepto" value={item.concept} onChange={e=>handleItemChange(index, 'concept', e.target.value)} className="flex-1 p-2 text-sm border rounded-lg w-full" required />
+              <div key={index} className="flex flex-col sm:flex-row gap-3 bg-slate-50 p-3 rounded-xl border w-full">
+                <input list="saved-concepts" placeholder="Concepto del trabajo" value={item.concept} onChange={e=>handleItemChange(index, 'concept', e.target.value)} className="flex-1 p-3 text-sm border rounded-lg w-full font-bold" required />
                 <div className="flex gap-2 w-full sm:w-auto">
-                  <input type="number" min="1" placeholder="Ud" value={item.quantity} onChange={e=>handleItemChange(index, 'quantity', e.target.value)} className="w-16 p-2 text-sm border rounded-lg" required />
-                  <input type="number" step="0.01" placeholder="Precio" value={item.price} onChange={e=>handleItemChange(index, 'price', e.target.value)} className="w-20 p-2 text-sm border rounded-lg" required />
-                  {items.length > 1 && <button type="button" onClick={()=>removeItem(index)} className="p-2 text-red-500 bg-red-50 rounded-lg text-sm">X</button>}
+                  <input type="number" min="1" placeholder="Uds" value={item.quantity} onChange={e=>handleItemChange(index, 'quantity', e.target.value)} className="w-20 p-3 text-base font-black border rounded-lg text-center" required />
+                  <input type="number" step="0.01" placeholder="Precio" value={item.price} onChange={e=>handleItemChange(index, 'price', e.target.value)} className="w-24 p-3 text-base font-black border rounded-lg text-center" required />
+                  {items.length > 1 && <button type="button" onClick={()=>removeItem(index)} className="w-12 bg-red-100 text-red-600 rounded-lg text-lg font-black flex items-center justify-center">X</button>}
                 </div>
               </div>
             ))}
-            <button type="button" onClick={addItem} className="text-xs font-bold text-indigo-600">+ Añadir partida</button>
+            <button type="button" onClick={addItem} className="text-sm font-black text-indigo-600 px-4 py-2 bg-indigo-50 rounded-lg inline-block mt-2">+ Añadir otra partida</button>
           </div>
 
-          <div className="space-y-2">
-            <h3 className="font-bold border-b pb-1 text-sm">Notas e Imágenes</h3>
-            <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Observaciones..." className="w-full p-2.5 text-sm border rounded-xl min-h-[60px]" />
-            <input type="file" multiple accept="image/*,video/*,audio/*,.pdf" onChange={e => { if(e.target.files) setFiles(Array.from(e.target.files)) }} className="w-full text-xs text-slate-500 file:mr-4 file:py-1 file:px-3 file:rounded-full file:border-0 file:bg-indigo-50 file:text-indigo-700" />
+          {/* ZONA DE PARTIDAS EXISTENTES DENTRO DEL FORMULARIO DE EDICIÓN */}
+          <div className="bg-slate-50 p-4 rounded-xl border space-y-3">
+            <h3 className="font-bold text-base">Notas e Imágenes</h3>
+            <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Observaciones generales para la empresa..." className="w-full p-3 text-base font-medium border rounded-xl min-h-[100px]" />
+            <input type="file" multiple accept="image/*,video/*,audio/*,.pdf" onChange={e => { if(e.target.files) setFiles(Array.from(e.target.files)) }} className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-indigo-100 file:text-indigo-700 file:font-bold" />
             
             {(editingId && (works.find(w => w.id === editingId)?.attachments?.length || 0) > 0) && (
-              <div className="flex gap-2 flex-wrap pt-2">
+              <div className="flex gap-2 flex-wrap pt-3 border-t">
                 {works.find(w => w.id === editingId)?.attachments.map((url:string, i:number) => (
-                  <a key={i} href={url} target="_blank" rel="noreferrer" className="text-[10px] bg-slate-100 text-slate-600 px-2 py-1 rounded font-bold border">📎 Archivo {i+1}</a>
+                  <a key={i} href={url} target="_blank" rel="noreferrer" className="text-xs bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-bold border border-slate-300">📎 Archivo Subido {i+1}</a>
                 ))}
               </div>
             )}
           </div>
 
           {isAdmin && editingId && (
-            <div className="pt-2 border-t">
-              <label className="text-xs font-bold text-slate-500 uppercase mb-1 block">Estado del trabajo</label>
-              <select className="w-full p-2.5 text-sm border rounded-xl bg-slate-50 font-bold" value={works.find(w=>w.id===editingId)?.status || 'ejecutando'} onChange={(e) => updateStatus(editingId as string, e.target.value)}>
-                <option value="ejecutando">Ejecutando (En Marcha)</option>
-                <option value="aprobado">Aprobar (Falta pagar)</option>
-                <option value="pagado">💰 Marcar Pagado (Va a Terminados)</option>
+            <div className="pt-4 border-t border-slate-200">
+              <label className="text-sm font-bold text-slate-600 uppercase mb-2 block">Estado Oficial del Trabajo</label>
+              <select className="w-full p-4 text-base border-2 border-indigo-200 rounded-xl bg-indigo-50 font-black text-indigo-800 outline-none" value={works.find(w=>w.id===editingId)?.status || 'ejecutando'} onChange={(e) => updateStatus(editingId as string, e.target.value)}>
+                <option value="ejecutando">🏗️ Ejecutando (En Marcha)</option>
+                <option value="aprobado">✅ Aprobar (Falta pagar)</option>
+                <option value="pagado">💰 Marcar Pagado (Mover a Terminados)</option>
               </select>
             </div>
           )}
 
-          <button type="submit" disabled={isSubmitting} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md">
-            {isSubmitting ? 'Guardando...' : 'Guardar Parte'}
+          <button type="submit" disabled={isSubmitting} className="w-full py-4 mt-6 bg-indigo-600 text-white rounded-xl font-black text-lg shadow-lg hover:bg-indigo-700 active:scale-95 transition-all">
+            {isSubmitting ? 'Guardando información...' : 'Guardar y Cerrar Parte'}
           </button>
         </form>
       )}
