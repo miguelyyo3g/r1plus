@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 
 export default function FreelanceWorksView({ user }: { user: any }) {
   const [works, setWorks] = useState<any[]>([]);
+  const [team, setTeam] = useState<any[]>([]); // Lista de comerciales para el gerente
   const [isLoading, setIsLoading] = useState(true);
   const [view, setView] = useState<'list' | 'new'>('list');
   const [profile, setProfile] = useState<any>(null);
@@ -12,6 +13,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
+  const [selectedWorker, setSelectedWorker] = useState(''); // Para que el gerente elija
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -21,13 +23,11 @@ export default function FreelanceWorksView({ user }: { user: any }) {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      // 1. Cargar perfil del usuario actual
       const { data: myProfile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       setProfile(myProfile);
 
       const isAdmin = myProfile?.role === 'admin' || myProfile?.role === 'superadmin';
 
-      // 2. Cargar los partes de trabajo según el rol
       let query = supabase.from('freelance_works').select('*, worker:profiles!worker_id(name)').order('created_at', { ascending: false });
       
       if (!isAdmin) {
@@ -36,6 +36,14 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       } else {
         // El gerente ve los de su organización
         query = query.eq('organization_id', user.id);
+        
+        // Cargamos los operarios de la empresa para que el gerente pueda seleccionarlos al crear un parte
+        const { data: teamData } = await supabase.from('profiles')
+          .select('id, name')
+          .eq('company', myProfile?.company)
+          .eq('role', 'sales_rep');
+        
+        if (teamData) setTeam(teamData);
       }
 
       const { data, error } = await query;
@@ -51,23 +59,35 @@ export default function FreelanceWorksView({ user }: { user: any }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+
     if (!title || !price) return alert('El título y el precio son obligatorios');
+    if (isAdmin && !selectedWorker) return alert('Debes seleccionar a qué operario pertenece este parte');
+    
     setIsSubmitting(true);
 
     try {
-      // Buscar el ID de la organización (el admin que tiene la misma 'company')
-      const { data: adminData } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('company', profile?.company)
-        .eq('role', 'admin')
-        .single();
+      let organizationId = user.id;
+      let workerId = user.id;
 
-      const organizationId = adminData?.id || user.id; // Fallback por seguridad
+      if (isAdmin) {
+        // Si lo crea el gerente, asigna el ID del operario seleccionado
+        organizationId = user.id; 
+        workerId = selectedWorker; 
+      } else {
+        // Si lo crea el autónomo, busca el ID de su jefe
+        workerId = user.id;
+        const { data: adminData } = await supabase.from('profiles')
+          .select('id')
+          .eq('company', profile?.company)
+          .eq('role', 'admin')
+          .single();
+        organizationId = adminData?.id || user.id;
+      }
 
       const { error } = await supabase.from('freelance_works').insert({
         organization_id: organizationId,
-        worker_id: user.id,
+        worker_id: workerId,
         title,
         description,
         price: parseFloat(price),
@@ -76,8 +96,8 @@ export default function FreelanceWorksView({ user }: { user: any }) {
 
       if (error) throw error;
       
-      alert('Parte de trabajo enviado con éxito');
-      setTitle(''); setDescription(''); setPrice('');
+      alert('Parte de trabajo registrado con éxito');
+      setTitle(''); setDescription(''); setPrice(''); setSelectedWorker('');
       setView('list');
       loadData();
     } catch (error: any) {
@@ -110,9 +130,9 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-black text-slate-800">🏗️ Partes de Trabajo</h2>
-          <p className="text-sm text-slate-500 mt-1">Gestión de obras, instalaciones y facturación de operarios.</p>
+          <p className="text-sm text-slate-500 mt-1">Gestión de obras, instalaciones y facturación.</p>
         </div>
-        {!isAdmin && view === 'list' && (
+        {view === 'list' && (
           <button onClick={() => setView('new')} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl shadow-md hover:bg-indigo-700">
             + Nuevo Parte
           </button>
@@ -127,8 +147,26 @@ export default function FreelanceWorksView({ user }: { user: any }) {
       {view === 'new' ? (
         /* FORMULARIO DE NUEVO PARTE */
         <form onSubmit={handleSubmit} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-5">
-          <h3 className="font-bold text-slate-700 border-b pb-2">Rellenar nuevo trabajo realizado</h3>
+          <h3 className="font-bold text-slate-700 border-b pb-2">Registrar trabajo realizado</h3>
           
+          {/* Si es gerente, le mostramos el desplegable para elegir operario */}
+          {isAdmin && (
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Asignar a Operario / Autónomo</label>
+              <select 
+                value={selectedWorker} 
+                onChange={e => setSelectedWorker(e.target.value)} 
+                className="w-full p-3 rounded-xl border border-slate-300 focus:border-indigo-500 outline-none font-medium bg-slate-50" 
+                required
+              >
+                <option value="">-- Selecciona quién hizo el trabajo --</option>
+                {team.map(t => (
+                  <option key={t.id} value={t.id}>{t.name || 'Sin nombre'}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div>
             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Título / Concepto</label>
             <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej: Instalación de Pérgola" className="w-full p-3 rounded-xl border border-slate-300 focus:border-indigo-500 outline-none font-medium" required />
@@ -145,7 +183,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
           </div>
 
           <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-lg shadow-md hover:bg-indigo-700 disabled:bg-slate-400">
-            {isSubmitting ? 'Enviando...' : 'Enviar Parte para Revisión'}
+            {isSubmitting ? 'Guardando...' : isAdmin ? 'Guardar Parte de Trabajo' : 'Enviar Parte para Revisión'}
           </button>
         </form>
       ) : (
@@ -177,7 +215,7 @@ export default function FreelanceWorksView({ user }: { user: any }) {
                   <h4 className="font-black text-slate-800 text-lg">{work.title}</h4>
                   {isAdmin && <p className="text-xs font-bold text-indigo-600 mt-0.5">👤 Operario: {work.worker?.name || 'Desconocido'}</p>}
                   <p className="text-sm text-slate-500 mt-1 line-clamp-2">{work.description}</p>
-                  <p className="text-xs text-slate-400 mt-2 font-mono">📅 {new Date(work.work_date).toLocaleDateString()}</p>
+                  <p className="text-xs text-slate-400 mt-2 font-mono">📅 {new Date(work.created_at).toLocaleDateString()}</p>
                 </div>
                 
                 <div className="flex flex-col sm:items-end gap-2">
