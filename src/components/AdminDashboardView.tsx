@@ -14,6 +14,11 @@ interface AdminDashboardViewProps {
 }
 
 export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashboardViewProps) {
+  // Estado de autorización
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  // Estados de datos
   const [users, setUsers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -30,8 +35,37 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
     storageLimitGB: 50.0  // Límite del plan de Supabase
   });
 
+  // 1. Verificación de Seguridad al montar el componente
   useEffect(() => {
-    fetchAdminUsers();
+    const verifySuperAdmin = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          window.location.href = '/';
+          return;
+        }
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+
+        if (profile?.role === 'superadmin') {
+          setIsSuperAdmin(true);
+          fetchAdminUsers(); // Solo cargamos los datos si pasó la barrera
+        } else {
+          // Expulsa a cualquier usuario que no tenga el rol correcto
+          window.location.href = '/'; 
+        }
+      } catch (error) {
+        console.error('Error verificando rol:', error);
+      } finally {
+        setIsAuthLoading(false);
+      }
+    };
+
+    verifySuperAdmin();
   }, []);
 
   const fetchAdminUsers = async () => {
@@ -97,6 +131,7 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
 
   const getRoleLabel = (role: string) => {
     switch(role) {
+      case 'superadmin': return 'Super Administrador';
       case 'supplier_owner': return 'Gerencia Proveedor';
       case 'sales_rep': return 'Comercial';
       case 'buyer': return 'Cliente / Instalador';
@@ -107,6 +142,20 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
   };
 
   const storagePercentage = (stats.totalStorageGB / stats.storageLimitGB) * 100;
+
+  // 2. Pantalla de carga mientras verifica credenciales
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-center font-bold text-slate-500 animate-pulse">
+          Verificando credenciales de seguridad...
+        </div>
+      </div>
+    );
+  }
+
+  // 3. Muro final: Si no es superadmin, no renderiza nada (la redirección ya lo está echando)
+  if (!isSuperAdmin) return null;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 font-sans p-4 sm:p-6 space-y-5">
@@ -225,12 +274,14 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
                     >
                       📇 Ver Ficha
                     </button>
-                    <button 
-                      onClick={() => handleToggleUserStatus(u.id, u.status)}
-                      className={`px-4 py-2 rounded-xl font-bold text-xs cursor-pointer shadow-sm transition ${u.status === 'suspended' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-rose-600 hover:bg-rose-700 text-white'}`}
-                    >
-                      {u.status === 'suspended' ? 'Reanudar' : 'Bloquear'}
-                    </button>
+                    {u.role !== 'superadmin' && (
+                      <button 
+                        onClick={() => handleToggleUserStatus(u.id, u.status)}
+                        className={`px-4 py-2 rounded-xl font-bold text-xs cursor-pointer shadow-sm transition ${u.status === 'suspended' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-rose-600 hover:bg-rose-700 text-white'}`}
+                      >
+                        {u.status === 'suspended' ? 'Reanudar' : 'Bloquear'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -254,7 +305,7 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               
-              {/* COLUMNA IZQUIERDA: DATOS FISCALES (SOLO LECTURA PARA EL ADMIN) */}
+              {/* COLUMNA IZQUIERDA: DATOS FISCALES */}
               <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4">
                 <h4 className="font-bold text-slate-500 uppercase tracking-widest text-xs border-b border-slate-200 pb-2 mb-4">Información del Usuario</h4>
                 
@@ -308,6 +359,7 @@ export default function AdminDashboardView({ onBackToApp, onLogout }: AdminDashb
                       <option value="sales_rep">Comercial</option>
                       <option value="supplier_owner">Gerencia Proveedor</option>
                       <option value="admin">Administrador Global</option>
+                      <option value="superadmin">👑 Super Administrador</option>
                     </select>
                   </div>
 
