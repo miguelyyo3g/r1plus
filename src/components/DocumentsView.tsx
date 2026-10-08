@@ -3,15 +3,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { AuthUser } from './LoginPage';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-);
+import { supabase } from '@/lib/supabaseclient';
 
 interface DocumentsViewProps {
   user: AuthUser;
