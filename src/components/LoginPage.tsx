@@ -23,7 +23,6 @@ interface LoginPageProps {
   onLoginSuccess: (user: AuthUser) => void;
 }
 
-// Funciones auxiliares para convertir las credenciales biométricas
 const bufferToBase64 = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -176,7 +175,6 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
     }
   };
 
-  // --- LÓGICA BIOMÉTRICA NATIVA (WEB AUTH API) ---
   const handleBiometricLogin = async () => {
     try {
       setLoginError('');
@@ -185,11 +183,9 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
         return;
       }
 
-      // Verificamos si ya hay una huella registrada en la memoria local
       const credentialIdStr = localStorage.getItem('r1plus_biometric_id');
 
       if (!credentialIdStr) {
-        // 1. REGISTRO DE HUELLA (Primera vez que toca el botón)
         const challenge = new Uint8Array(32);
         window.crypto.getRandomValues(challenge);
         const userId = new Uint8Array(16);
@@ -204,9 +200,9 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
               name: tempUser?.phone || 'usuario',
               displayName: tempUser?.name || 'Usuario r1plus'
             },
-            pubKeyCredParams: [{ type: 'public-key', alg: -7 }], // ES256 (Estandar para móviles)
+            pubKeyCredParams: [{ type: 'public-key', alg: -7 }], 
             authenticatorSelection: {
-              authenticatorAttachment: 'platform', // Obliga a usar el escáner del móvil (huella/FaceID)
+              authenticatorAttachment: 'platform', 
               userVerification: 'required'
             },
             timeout: 60000
@@ -214,7 +210,6 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
         });
 
         if (credential) {
-          // Guardamos la ID de su huella para reconocerlo la próxima vez
           const base64Id = bufferToBase64((credential as any).rawId);
           localStorage.setItem('r1plus_biometric_id', base64Id);
           
@@ -224,7 +219,6 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
           }
         }
       } else {
-        // 2. VERIFICACIÓN DE HUELLA (Veces posteriores)
         const challenge = new Uint8Array(32);
         window.crypto.getRandomValues(challenge);
         const credentialId = base64ToBuffer(credentialIdStr);
@@ -250,7 +244,6 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
         }
       }
     } catch (error: any) {
-      // Si el usuario cancela la pantalla de huella o falla, lo dejamos usar el PIN sin mostrar un error agresivo
       if (error.name !== 'NotAllowedError') {
         setLoginError('No se pudo verificar la biometría. Usa el PIN.');
       }
@@ -294,9 +287,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
         delete accounts[tempUser.phone]; 
         localStorage.setItem('r1plus_accounts', JSON.stringify(accounts));
       }
-      // Opcional: Borramos también su registro de huella al olvidar el PIN
       localStorage.removeItem('r1plus_biometric_id');
-      
       setPhoneInput(tempUser.phone.replace('+34', ''));
     }
     handleLogout();
@@ -340,17 +331,17 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
       {authStep === 'setupProfile' && (
         <div className="w-full max-w-sm bg-white rounded-3xl p-8 shadow-2xl text-center">
-          <h2 className="text-xl font-bold text-slate-800 mb-2">Asegura tu cuenta</h2>
-          <p className="text-xs text-slate-500 mb-6">Con tu día y mes, podrán saber cuándo cumples años.</p>
+          <h2 className="text-xl font-bold text-slate-800 mb-1">¿Quieres que te feliciten?</h2>
+          <p className="text-xs text-slate-500 mb-6 font-medium">Pon el día y el mes</p>
           {loginError && <div className="text-rose-500 text-xs font-bold mb-4">{loginError}</div>}
           
           <form onSubmit={handleSetupSubmit} className="space-y-4">
             <div className="flex gap-3">
-              <input type="number" placeholder="Día (Ej: 14)" value={birthDay} onChange={e => setBirthDay(e.target.value)} min="1" max="31" className="w-1/2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-center font-bold focus:outline-none focus:border-indigo-500" />
-              <input type="number" placeholder="Mes (Ej: 08)" value={birthMonth} onChange={e => setBirthMonth(e.target.value)} min="1" max="12" className="w-1/2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-center font-bold focus:outline-none focus:border-indigo-500" />
+              <input type="number" placeholder="Día" value={birthDay} onChange={e => setBirthDay(e.target.value)} min="1" max="31" className="w-1/2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-center font-bold focus:outline-none focus:border-indigo-500" />
+              <input type="number" placeholder="Mes" value={birthMonth} onChange={e => setBirthMonth(e.target.value)} min="1" max="12" className="w-1/2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-center font-bold focus:outline-none focus:border-indigo-500" />
             </div>
             
-            <div className="pt-2 border-t border-slate-100">
+            <div className="pt-4 border-t border-slate-100 mt-2">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Crea un PIN (4 dígitos)</label>
               <input type="password" maxLength={4} placeholder="••••" value={pin} onChange={e => setPin(e.target.value)} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-center font-bold text-2xl tracking-[1em] focus:outline-none focus:border-indigo-500 mb-3" />
               
