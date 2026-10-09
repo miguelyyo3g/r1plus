@@ -34,9 +34,13 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [newExpenseAmount, setNewExpenseAmount] = useState<number | ''>('');
   const [woTab, setWoTab] = useState<'info' | 'gastos' | 'archivos'>('info');
 
+  // PRESUPUESTOS Y DATOS DEL CLIENTE
   const [bCode, setBCode] = useState('');
   const [bWorkOrderRef, setBWorkOrderRef] = useState('');
   const [bValidUntil, setBValidUntil] = useState('');
+  
+  // NUEVO: Control inteligente del cliente
+  const [bClientId, setBClientId] = useState<string | null>(null);
   const [bClient, setBClient] = useState('');
   const [bCif, setBCif] = useState('');
   const [bAddress, setBAddress] = useState('');
@@ -145,23 +149,31 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
           }
         }
       };
-
       await getFolderBytes('');
-      const calculatedMB = Number((totalBytes / (1024 * 1024)).toFixed(2));
-      setStorageUsedMB(calculatedMB);
+      setStorageUsedMB(Number((totalBytes / (1024 * 1024)).toFixed(2)));
     } catch (e) {
       console.warn('Error calculando storage:', e);
     }
   };
 
-  const handleOpenAddBudget = () => {
+  const resetBudgetForm = () => {
     setBCode(generateNextBudgetCode());
+    setBClientId(null);
+    setBClient('');
+    setBCif('');
+    setBAddress('');
+    setBEmail('');
+    setBPhone('');
+    setBWorkOrderRef('');
+    setBValidUntil('');
+    setBItems([{ desc: '', qty: 1, price: 0 }]);
+  };
+
+  const handleOpenAddBudget = () => {
+    resetBudgetForm();
     setShowAddBudgetModal(true);
   };
 
-  // =========================================================================
-  // FUNCIÓN MEJORADA: PREVENCIÓN DE CUELGUES (HEIC + TIMEOUT)
-  // =========================================================================
   const handleScanWorkOrder = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -170,14 +182,12 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     try {
       const reader = new FileReader();
       reader.readAsDataURL(file);
-      
       reader.onload = (event) => {
         const img = new Image();
         img.src = event.target?.result as string;
         
-        // Control de errores de formato en el navegador (Ej: Fotos HEIC de iPhone)
         img.onerror = () => {
-          alert('❌ El navegador no puede procesar esta foto. Si es un archivo HEIC, por favor haz la foto directamente con la cámara del botón.');
+          alert('❌ El navegador no puede procesar esta foto. Si es un archivo HEIC, usa la cámara en su lugar.');
           setIsScanning(false);
           e.target.value = '';
         };
@@ -189,13 +199,10 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             const scaleSize = MAX_WIDTH / img.width;
             canvas.width = MAX_WIDTH;
             canvas.height = img.height * scaleSize;
-            
             const ctx = canvas.getContext('2d');
             ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-            
             const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
 
-            // Controlador para abortar la petición si tarda más de 25 segundos
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 25000);
 
@@ -209,21 +216,36 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-              let errorMsg = 'Error en el servidor de IA';
-              try {
-                const errorData = await response.json();
-                errorMsg = errorData.error || errorMsg;
-              } catch (parseErr) {
-                errorMsg = `Error ${response.status}: Respuesta no válida.`;
-              }
-              throw new Error(errorMsg);
+              const errorData = await response.json();
+              throw new Error(errorData.error || `Error ${response.status}`);
             }
 
             const data = await response.json();
 
-            if (data.client_name) setBClient(data.client_name);
-            if (data.client_address) setBAddress(data.client_address);
-            if (data.client_phone) setBPhone(data.client_phone);
+            // Mapeo inteligente con el CRM después del escaneo
+            let foundClient = null;
+            if (data.client_name) {
+              foundClient = crmClients.find(c => 
+                c.name?.toLowerCase().includes(data.client_name.toLowerCase()) || 
+                (c.company && c.company.toLowerCase().includes(data.client_name.toLowerCase())) ||
+                (data.client_phone && c.phone && c.phone.includes(data.client_phone))
+              );
+            }
+
+            if (foundClient) {
+              setBClientId(foundClient.id);
+              setBClient(foundClient.company ? `${foundClient.name} (${foundClient.company})` : foundClient.name);
+              setBCif(foundClient.cif || foundClient.company_cif || data.client_cif || '');
+              setBAddress(foundClient.address || data.client_address || '');
+              setBPhone(foundClient.phone || foundClient.company_phone || data.client_phone || '');
+              setBEmail(foundClient.email || foundClient.admin_email || '');
+            } else {
+              setBClientId(null);
+              if (data.client_name) setBClient(data.client_name);
+              if (data.client_address) setBAddress(data.client_address);
+              if (data.client_phone) setBPhone(data.client_phone);
+            }
+
             if (data.work_order_ref) setBWorkOrderRef(data.work_order_ref);
             
             if (data.items && data.items.length > 0) {
@@ -235,10 +257,10 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               setBItems(parsedItems);
             }
 
-            alert('✅ ¡Magia completada! Por favor revisa y ajusta los datos extraídos.');
+            alert('✅ ¡Datos extraídos por IA! Por favor revisa y ajusta la información.');
           } catch (err: any) {
             if (err.name === 'AbortError') {
-              alert('❌ Tiempo agotado. La IA tardó demasiado en responder, vuelve a intentarlo.');
+              alert('❌ Tiempo agotado. La IA tardó demasiado en responder.');
             } else {
               alert('❌ La IA detectó un error: ' + err.message);
             }
@@ -253,6 +275,109 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       setIsScanning(false);
       e.target.value = '';
     }
+  };
+
+  const handleClientInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value; 
+    setBClient(val);
+    
+    // Si el usuario escribe manualmente, quitamos el ID para que cuente como cliente nuevo
+    // a menos que seleccione explícitamente uno de la lista de sugerencias.
+    setBClientId(null);
+    
+    if (val.trim().length > 0) {
+      setFilteredSuggestions(crmClients.filter(c => 
+        (c.name && c.name.toLowerCase().includes(val.toLowerCase())) || 
+        (c.company && c.company.toLowerCase().includes(val.toLowerCase())) ||
+        (c.phone && c.phone.includes(val))
+      ));
+      setShowSuggestions(true);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
+  const handleSelectSuggestion = (cli: any) => {
+    setBClientId(cli.id);
+    setBClient(cli.company ? `${cli.name} (${cli.company})` : cli.name); 
+    setBCif(cli.cif || cli.company_cif || ''); 
+    setBAddress(cli.address || ''); 
+    setBEmail(cli.email || cli.admin_email || ''); 
+    setBPhone(cli.phone || cli.company_phone || '');
+    setShowSuggestions(false);
+  };
+
+  const getFilteredCatalog = (desc: string) => desc.trim() ? catalogItems.filter(c => c.description.toLowerCase().includes(desc.toLowerCase())) : [];
+  const handleAddItemRow = () => setBItems(prev => [...prev, { desc: '', qty: 1, price: 0 }]);
+  const calculatedSubtotal = bItems.reduce((acc, item) => acc + (Number(item.qty) || 0) * (Number(item.price) || 0), 0);
+  const calculatedTotal = calculatedSubtotal * 1.21;
+
+  // =========================================================================
+  // GUARDAR PRESUPUESTO + GESTIÓN INTELIGENTE DEL CRM
+  // =========================================================================
+  const handleSaveBudget = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      let finalClientId = bClientId;
+
+      // 1. Lógica de guardado en el CRM
+      if (!bClientId && bClient.trim() !== '') {
+        // ES UN CLIENTE NUEVO -> Lo creamos automático en el CRM
+        const newClientPayload = {
+          name: bClient, cif: bCif, address: bAddress, email: bEmail, phone: bPhone, user_id: user.id
+        };
+        const { data: newCli } = await supabase.from('clients').insert([newClientPayload]).select();
+        if (newCli) {
+          finalClientId = newCli[0].id;
+          setCrmClients(prev => [...prev, newCli[0]]);
+        }
+      } else if (bClientId) {
+        // ES UN CLIENTE EXISTENTE -> Comparamos para ver si han modificado algo
+        const original = crmClients.find(c => c.id === bClientId);
+        if (original) {
+          const originalName = original.company ? `${original.name} (${original.company})` : original.name;
+          const originalCif = original.cif || original.company_cif || '';
+          const originalAddress = original.address || '';
+          const originalEmail = original.email || original.admin_email || '';
+          const originalPhone = original.phone || original.company_phone || '';
+
+          // Comprobamos si hay alguna diferencia entre lo que había y lo que han tecleado
+          if (bClient !== originalName || bCif !== originalCif || bAddress !== originalAddress || bEmail !== originalEmail || bPhone !== originalPhone) {
+            const wantToUpdate = window.confirm('Has modificado los datos de este cliente en el formulario.\n\n¿Quieres guardar estos cambios permanentemente en su ficha del CRM?');
+            
+            if (wantToUpdate) {
+              const updatePayload = {
+                name: bClient.includes('(') ? bClient.split(' (')[0].trim() : bClient, // Limpia el nombre si tenía empresa
+                cif: bCif,
+                address: bAddress,
+                email: bEmail,
+                phone: bPhone
+              };
+              const { data: updatedCli } = await supabase.from('clients').update(updatePayload).eq('id', bClientId).select();
+              if (updatedCli) {
+                setCrmClients(prev => prev.map(c => c.id === bClientId ? updatedCli[0] : c));
+              }
+            }
+          }
+        }
+      }
+
+      // 2. Guardado del Presupuesto
+      const { data, error } = await supabase.from('budgets').insert([{
+        code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
+        subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, pdf_name: `${bCode}.pdf`, items: bItems, 
+        user_id: user.id, status: 'pendiente', type: 'presupuesto'
+      }]).select();
+
+      if (error) throw error;
+      if (data) {
+        const updatedBudgets = [data[0], ...budgets];
+        setBudgets(updatedBudgets); 
+        setShowAddBudgetModal(false);
+        resetBudgetForm();
+        setBCode(generateNextBudgetCode(updatedBudgets)); // Pre-generamos el siguiente
+      }
+    } catch (err: any) { alert('Error: ' + err.message); }
   };
 
   const handleAcceptBudget = async (budget: any) => {
@@ -588,46 +713,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     } catch (err: any) { alert('Error guardando cliente: ' + err.message); }
   };
 
-  const handleClientInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value; setBClient(val);
-    if (val.trim().length > 0) {
-      setFilteredSuggestions(crmClients.filter(c => (c.name && c.name.toLowerCase().includes(val.toLowerCase())) || (c.company && c.company.toLowerCase().includes(val.toLowerCase()))));
-      setShowSuggestions(true);
-    } else setShowSuggestions(false);
-  };
-
-  const handleSelectSuggestion = (cli: any) => {
-    setBClient(cli.company ? `${cli.name} (${cli.company})` : cli.name); 
-    setBCif(cli.cif || cli.company_cif || ''); setBAddress(cli.address || ''); 
-    setBEmail(cli.email || cli.admin_email || ''); setBPhone(cli.phone || cli.company_phone || '');
-    setShowSuggestions(false);
-  };
-
-  const getFilteredCatalog = (desc: string) => desc.trim() ? catalogItems.filter(c => c.description.toLowerCase().includes(desc.toLowerCase())) : [];
-  const handleAddItemRow = () => setBItems(prev => [...prev, { desc: '', qty: 1, price: 0 }]);
-  const calculatedSubtotal = bItems.reduce((acc, item) => acc + (Number(item.qty) || 0) * (Number(item.price) || 0), 0);
-  const calculatedTotal = calculatedSubtotal * 1.21;
-
-  const handleSaveBudget = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const { data, error } = await supabase.from('budgets').insert([{
-        code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
-        subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, pdf_name: `${bCode}.pdf`, items: bItems, 
-        user_id: user.id, status: 'pendiente', type: 'presupuesto'
-      }]).select();
-
-      if (error) throw error;
-      if (data) {
-        const updatedBudgets = [data[0], ...budgets];
-        setBudgets(updatedBudgets); 
-        setShowAddBudgetModal(false);
-        setBCode(generateNextBudgetCode(updatedBudgets));
-        setBWorkOrderRef(''); setBClient(''); setBItems([{ desc: '', qty: 1, price: 0 }]);
-      }
-    } catch (err: any) { alert('Error: ' + err.message); }
-  };
-
   const handleSaveCatalogItem = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -735,22 +820,12 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   };
 
   const filteredBudgets = budgets.filter(b => docTab === 'presupuestos' ? b.type !== 'factura' && b.code.startsWith('PRE') : b.type === 'factura' || b.code.startsWith('FAC'));
-  
-  const activeClientBudgets = budgets.filter(b => b.client_cif === crmForm.cif || b.client.includes(crmForm.name));
-  const activeClientTotalPresupuestado = activeClientBudgets.filter(b => b.type === 'presupuesto').reduce((acc, b) => acc + Number(b.total || 0), 0);
-  const activeClientTotalFacturado = activeClientBudgets.filter(b => b.type === 'factura').reduce((acc, b) => acc + Number(b.total || 0), 0);
-  const activeClientTotalPendiente = activeClientBudgets.filter(b => b.type === 'factura' && b.status !== 'cobrada').reduce((acc, b) => acc + Number(b.total || 0), 0);
-
   const filteredCrmList = crmClients.filter(c => {
     if (!crmSearchQuery.trim()) return true;
     const q = crmSearchQuery.toLowerCase();
     return (
-      (c.name && c.name.toLowerCase().includes(q)) ||
-      (c.phone && c.phone.includes(q)) ||
-      (c.company && c.company.toLowerCase().includes(q)) ||
-      (c.cif && c.cif.toLowerCase().includes(q)) ||
-      (c.city && c.city.toLowerCase().includes(q)) ||
-      (c.population && c.population.toLowerCase().includes(q))
+      (c.name && c.name.toLowerCase().includes(q)) || (c.phone && c.phone.includes(q)) || (c.company && c.company.toLowerCase().includes(q)) ||
+      (c.cif && c.cif.toLowerCase().includes(q)) || (c.city && c.city.toLowerCase().includes(q)) || (c.population && c.population.toLowerCase().includes(q))
     );
   });
 
@@ -760,10 +835,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     facturado: budgets.filter(b => b.type === 'factura').reduce((acc, b) => acc + Number(b.total || 0), 0),
     pendiente: budgets.filter(b => b.type === 'factura' && b.status !== 'cobrada').reduce((acc, b) => acc + Number(b.total || 0), 0),
   };
-
-  const calculatedCurrentSubtotalRest = restInvoiceModal.items.reduce((acc, item) => acc + (Number(item.qty) || 0) * (Number(item.price) || 0), 0);
-  const calculatedFinalSubtotalRest = calculatedCurrentSubtotalRest - restInvoiceModal.alreadyInvoicedSubtotal;
-  const calculatedFinalTotalRest = calculatedFinalSubtotalRest * 1.21;
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4 shadow-sm h-full flex flex-col overflow-hidden relative">
@@ -775,6 +846,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         </div>
       )}
 
+      {/* CABECERA CON BOTONES */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
         <div><h2 className="text-xl font-black text-slate-800">📁 Panel FSM & CRM</h2></div>
         <div className="flex flex-wrap gap-2">
@@ -944,6 +1016,135 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         )}
       </div>
 
+      {/* MODAL CREADOR DE PRESUPUESTO CON EL FORMULARIO INTEGRAL */}
+      {showAddBudgetModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 overflow-y-auto backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto my-auto animate-in zoom-in-95">
+            
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 shrink-0 gap-3">
+              <h3 className="font-black text-lg text-slate-800">📄 Creador de Presupuesto</h3>
+              <div className="flex items-center gap-2">
+                {isScanning ? (
+                  <span className="px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black shadow-sm">
+                    ⏳ Analizando Imagen...
+                  </span>
+                ) : (
+                  <div className="flex gap-2">
+                    <label className="px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black cursor-pointer hover:bg-emerald-100 transition flex items-center gap-1 shadow-sm" title="Hacer foto nueva">
+                      📸 Cámara
+                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleScanWorkOrder} />
+                    </label>
+                    <label className="px-3 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-black cursor-pointer hover:bg-indigo-100 transition flex items-center gap-1 shadow-sm" title="Elegir de la galería">
+                      🖼️ Galería
+                      <input type="file" accept="image/*" className="hidden" onChange={handleScanWorkOrder} />
+                    </label>
+                  </div>
+                )}
+                <button type="button" onClick={() => setShowAddBudgetModal(false)} className="w-8 h-8 ml-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition">✕</button>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveBudget} className="space-y-4 text-xs">
+              
+              {/* NUEVA SECCIÓN: DATOS DEL CLIENTE INTEGRALES */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                <div className="flex justify-between items-end border-b border-slate-200 pb-2 mb-2">
+                  <h4 className="font-black text-indigo-700 text-xs uppercase tracking-widest">Datos del Cliente</h4>
+                  {bClientId ? (
+                    <span className="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold">✅ Vinculado a CRM</span>
+                  ) : (
+                    <span className="text-[9px] bg-amber-100 text-amber-700 px-2 py-1 rounded font-bold">🆕 Nuevo Cliente (Se guardará)</span>
+                  )}
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative">
+                  <div className="sm:col-span-2 relative">
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Nombre o Empresa *</label>
+                    <input 
+                      type="text" required 
+                      placeholder="Escribe para buscar un cliente existente o escanea un parte..." 
+                      value={bClient} 
+                      onChange={handleClientInput} 
+                      onFocus={() => bClient.trim() && setShowSuggestions(true)} 
+                      onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} 
+                      className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 font-bold outline-none transition" 
+                    />
+                    {showSuggestions && filteredSuggestions.length > 0 && (
+                      <div className="absolute top-[60px] z-50 w-full bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                        {filteredSuggestions.map(cli => (
+                          <div key={cli.id} onClick={() => handleSelectSuggestion(cli)} className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 font-bold transition flex justify-between items-center">
+                            <span>{cli.company ? `${cli.name} (${cli.company})` : cli.name}</span>
+                            <span className="text-slate-400 font-normal">{cli.phone}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">CIF / NIF</label>
+                    <input type="text" value={bCif} onChange={e => setBCif(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition font-mono" />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Teléfono</label>
+                    <input type="tel" value={bPhone} onChange={e => setBPhone(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition font-mono" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Correo Electrónico</label>
+                    <input type="email" value={bEmail} onChange={e => setBEmail(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Dirección Completa</label>
+                    <input type="text" value={bAddress} onChange={e => setBAddress(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
+                  </div>
+                </div>
+              </div>
+
+              {/* SECCIÓN DEL PROYECTO */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Código Presupuesto</label>
+                  <input type="text" readOnly value={bCode} className="w-full p-2.5 border border-slate-300 bg-slate-100 rounded-lg font-bold font-mono text-slate-700 outline-none" />
+                </div>
+                <div>
+                  <label className="block font-bold text-indigo-700 mb-1 text-[10px] uppercase">Referencia de Obra *</label>
+                  <input type="text" required placeholder="Ej. Reforma Cocina" value={bWorkOrderRef} onChange={e => setBWorkOrderRef(e.target.value)} className="w-full p-2.5 border-2 border-indigo-200 bg-indigo-50/30 rounded-lg font-bold focus:border-indigo-600 focus:outline-none transition" />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Validez hasta</label>
+                  <input type="date" value={bValidUntil} onChange={e => setBValidUntil(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg font-medium focus:border-indigo-500 focus:outline-none transition" />
+                </div>
+              </div>
+
+              {/* PARTIDAS DEL PRESUPUESTO */}
+              <div className="space-y-2 pt-3 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-1">
+                  <h4 className="font-bold text-slate-800">Partidas y Materiales</h4>
+                  <button type="button" onClick={handleAddItemRow} className="px-2 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded font-bold hover:bg-indigo-100 transition">+ Línea</button>
+                </div>
+                {bItems.map((item, index) => (
+                  <div key={index} className="flex flex-col sm:flex-row gap-2 relative bg-slate-50 p-2 rounded-lg border border-slate-200">
+                    <input type="text" value={item.desc} onChange={e => { const u = [...bItems]; u[index].desc = e.target.value; setBItems(u); }} onFocus={() => setActiveItemIndex(index)} onBlur={() => setTimeout(() => setActiveItemIndex(null), 200)} className="flex-1 p-2 border border-slate-300 rounded-md focus:border-indigo-500 focus:outline-none transition" placeholder="Descripción..." />
+                    {activeItemIndex === index && getFilteredCatalog(item.desc).length > 0 && (
+                      <div className="absolute top-10 z-50 w-full bg-white border border-slate-200 shadow-xl max-h-40 overflow-y-auto rounded-lg">
+                        {getFilteredCatalog(item.desc).map(cat => <div key={cat.id} onClick={() => { const u = [...bItems]; u[index].desc = cat.description; u[index].price = cat.price; setBItems(u); setActiveItemIndex(null); }} className="p-3 hover:bg-indigo-50 cursor-pointer font-medium border-b border-slate-100 transition">{cat.description} <span className="font-black text-indigo-600 ml-2">({cat.price}€)</span></div>)}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <div className="w-16"><input type="number" value={item.qty} onChange={e => { const u = [...bItems]; u[index].qty = Number(e.target.value); setBItems(u); }} className="w-full p-2 border border-slate-300 rounded-md text-center font-bold focus:border-indigo-500 focus:outline-none transition" placeholder="Cant." /></div>
+                      <div className="w-20 relative"><input type="number" step="0.01" value={item.price} onChange={e => { const u = [...bItems]; u[index].price = Number(e.target.value); setBItems(u); }} className="w-full p-2 border border-slate-300 rounded-md text-right font-bold pr-5 focus:border-indigo-500 focus:outline-none transition" placeholder="Precio" /><span className="absolute right-1.5 top-2 text-slate-400 font-bold">€</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-slate-800 text-white p-3 rounded-lg flex items-center justify-between mt-2 shadow-md">
+                <span className="font-bold uppercase tracking-wider text-slate-300">Total IVA Inc.</span><span className="font-black text-lg">{calculatedTotal.toFixed(2)} €</span>
+              </div>
+              <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg shadow-md transition cursor-pointer mt-2 text-sm">Guardar y PDF</button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL ESTADÍSTICAS */}
       {showStatsModal && (
         <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
@@ -1094,93 +1295,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 </div>
               )}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL CREADOR DE PRESUPUESTO (AQUÍ ESTÁN LOS 2 BOTONES DE IA) */}
-      {showAddBudgetModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 overflow-y-auto backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto my-auto animate-in zoom-in-95">
-            
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 shrink-0 gap-3">
-              <h3 className="font-black text-lg text-slate-800">📄 Creador de Presupuesto</h3>
-              <div className="flex items-center gap-2">
-                {/* BOTONES MÁGICOS DE ESCANEAR CON IA */}
-                {isScanning ? (
-                  <span className="px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black shadow-sm">
-                    ⏳ Analizando Imagen...
-                  </span>
-                ) : (
-                  <div className="flex gap-2">
-                    <label className="px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black cursor-pointer hover:bg-emerald-100 transition flex items-center gap-1 shadow-sm" title="Hacer foto nueva">
-                      📸 Cámara
-                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleScanWorkOrder} />
-                    </label>
-                    <label className="px-3 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-black cursor-pointer hover:bg-indigo-100 transition flex items-center gap-1 shadow-sm" title="Elegir de la galería">
-                      🖼️ Galería
-                      <input type="file" accept="image/*" className="hidden" onChange={handleScanWorkOrder} />
-                    </label>
-                  </div>
-                )}
-                <button type="button" onClick={() => setShowAddBudgetModal(false)} className="w-8 h-8 ml-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition">✕</button>
-              </div>
-            </div>
-
-            <form onSubmit={handleSaveBudget} className="space-y-4 text-xs">
-              <div className="relative">
-                <div className="flex justify-between items-end mb-1">
-                  <label className="block font-bold text-slate-600 uppercase">Seleccionar Cliente de CRM *</label>
-                  <button type="button" onClick={() => { setShowAddBudgetModal(false); setDocTab('clientes'); openNewCrmModal(); }} className="text-[9px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold hover:bg-indigo-100 border border-indigo-100 transition">➕ NUEVO CRM</button>
-                </div>
-                <input type="text" required placeholder="Escribe para buscar o escanea un parte..." value={bClient} onChange={handleClientInput} onFocus={() => bClient.trim() && setShowSuggestions(true)} onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} className="w-full p-2.5 border-2 border-indigo-300 bg-indigo-50/50 rounded-lg focus:border-indigo-600 font-bold outline-none transition" />
-                {showSuggestions && filteredSuggestions.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                    {filteredSuggestions.map(cli => <div key={cli.id} onClick={() => handleSelectSuggestion(cli)} className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 font-bold transition">{cli.name} <span className="font-normal text-slate-500 ml-2">{cli.phone}</span></div>)}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Código Presupuesto</label>
-                  <input type="text" readOnly value={bCode} className="w-full p-2.5 border border-slate-300 bg-slate-100 rounded-lg font-bold font-mono text-slate-700 outline-none" />
-                </div>
-                <div>
-                  <label className="block font-bold text-indigo-700 mb-1">Referencia de Obra *</label>
-                  <input type="text" required placeholder="Ej. Reforma Cocina C/ Mayor" value={bWorkOrderRef} onChange={e => setBWorkOrderRef(e.target.value)} className="w-full p-2.5 border-2 border-indigo-200 bg-indigo-50/30 rounded-lg font-bold focus:border-indigo-600 focus:outline-none transition" />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-600 mb-1">Validez hasta</label>
-                  <input type="date" value={bValidUntil} onChange={e => setBValidUntil(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg font-medium focus:border-indigo-500 focus:outline-none transition" />
-                </div>
-              </div>
-
-              <div className="space-y-2 pt-3 border-t border-slate-200">
-                <div className="flex items-center justify-between mb-1">
-                  <h4 className="font-bold text-slate-800">Partidas y Materiales</h4>
-                  <button type="button" onClick={handleAddItemRow} className="px-2 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded font-bold hover:bg-indigo-100 transition">+ Línea</button>
-                </div>
-                {bItems.map((item, index) => (
-                  <div key={index} className="flex flex-col sm:flex-row gap-2 relative bg-slate-50 p-2 rounded-lg border border-slate-200">
-                    <input type="text" value={item.desc} onChange={e => { const u = [...bItems]; u[index].desc = e.target.value; setBItems(u); }} onFocus={() => setActiveItemIndex(index)} onBlur={() => setTimeout(() => setActiveItemIndex(null), 200)} className="flex-1 p-2 border border-slate-300 rounded-md focus:border-indigo-500 focus:outline-none transition" placeholder="Descripción..." />
-                    {activeItemIndex === index && getFilteredCatalog(item.desc).length > 0 && (
-                      <div className="absolute top-10 z-50 w-full bg-white border border-slate-200 shadow-xl max-h-40 overflow-y-auto rounded-lg">
-                        {getFilteredCatalog(item.desc).map(cat => <div key={cat.id} onClick={() => { const u = [...bItems]; u[index].desc = cat.description; u[index].price = cat.price; setBItems(u); setActiveItemIndex(null); }} className="p-3 hover:bg-indigo-50 cursor-pointer font-medium border-b border-slate-100 transition">{cat.description} <span className="font-black text-indigo-600 ml-2">({cat.price}€)</span></div>)}
-                      </div>
-                    )}
-                    <div className="flex gap-2">
-                      <div className="w-16"><input type="number" value={item.qty} onChange={e => { const u = [...bItems]; u[index].qty = Number(e.target.value); setBItems(u); }} className="w-full p-2 border border-slate-300 rounded-md text-center font-bold focus:border-indigo-500 focus:outline-none transition" placeholder="Cant." /></div>
-                      <div className="w-20 relative"><input type="number" step="0.01" value={item.price} onChange={e => { const u = [...bItems]; u[index].price = Number(e.target.value); setBItems(u); }} className="w-full p-2 border border-slate-300 rounded-md text-right font-bold pr-5 focus:border-indigo-500 focus:outline-none transition" placeholder="Precio" /><span className="absolute right-1.5 top-2 text-slate-400 font-bold">€</span></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="bg-slate-800 text-white p-3 rounded-lg flex items-center justify-between mt-2 shadow-md">
-                <span className="font-bold uppercase tracking-wider text-slate-300">Total IVA Inc.</span><span className="font-black text-lg">{calculatedTotal.toFixed(2)} €</span>
-              </div>
-              <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg shadow-md transition cursor-pointer mt-2 text-sm">Guardar y PDF</button>
-            </form>
           </div>
         </div>
       )}
