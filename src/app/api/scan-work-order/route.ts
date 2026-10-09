@@ -18,18 +18,13 @@ export async function POST(req: Request) {
       throw new Error("Falta la clave GEMINI_API_KEY en las variables de entorno de Vercel.");
     }
 
-    // LISTA DE MODELOS (PLAN A, PLAN B y PLAN C)
-    const modelsToTry = [
-      'gemini-1.5-flash',     // El principal (rápido pero a veces se satura)
-      'gemini-1.5-flash-8b',  // El ligero (súper rápido y con menos colas)
-      'gemini-1.5-pro'        // El potente (más lento pero más listo)
-    ];
-
+    const modelName = 'gemini-1.5-flash';
+    const maxRetries = 3;
     let data = null;
     let lastError = "";
 
-    // Bucle inteligente: si un modelo falla por alta demanda, prueba el siguiente al instante
-    for (const modelName of modelsToTry) {
+    // Bucle de reintentos sobre el MISMO modelo oficial
+    for (let i = 0; i < maxRetries; i++) {
       try {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
           method: 'POST',
@@ -61,11 +56,14 @@ export async function POST(req: Request) {
           const errMsg = resData.error?.message || response.statusText;
           lastError = errMsg;
           
-          // Si el error es de clave inválida, no seguimos probando. Si es saturación, continuamos.
-          if (response.status === 400 || response.status === 403) {
-            throw new Error(`Error de clave API: ${errMsg}`);
+          // Si es un error de clave API o permisos, cortamos de raíz (no tiene sentido reintentar)
+          if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+            throw new Error(`Error de API: ${errMsg}`);
           }
-          console.log(`El modelo ${modelName} falló. Probando el siguiente...`);
+          
+          // Si es error por alta demanda (429) o error interno de Google (500), esperamos 2 segundos y reintentamos
+          console.log(`Intento ${i + 1} saturado. Reintentando en 2 segundos...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
           continue; 
         }
 
@@ -75,13 +73,14 @@ export async function POST(req: Request) {
 
       } catch (e: any) {
         lastError = e.message;
-        if (e.message.includes("Error de clave API")) throw e;
+        if (e.message.includes("Error de API")) throw e;
+        // Esperar antes de reintentar si hay un fallo de red
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
 
-    // Si después de probar los 3 modelos no tenemos respuesta, lanzamos error
     if (!data || !data.candidates || data.candidates.length === 0 || !data.candidates[0].content) {
-        throw new Error(`Los 3 servidores de IA están saturados ahora mismo. Último error: ${lastError}`);
+        throw new Error(`Servidor de Google ocupado tras ${maxRetries} intentos. Inténtalo de nuevo en unos minutos. (Aviso: ${lastError})`);
     }
     
     let textResponse = data.candidates[0].content.parts[0].text;
