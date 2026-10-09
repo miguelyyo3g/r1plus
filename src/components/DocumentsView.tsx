@@ -6,7 +6,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 
 interface DocumentsViewProps {
-  user: AuthUser;
+  user: any;
 }
 
 export default function DocumentsView({ user }: DocumentsViewProps) {
@@ -21,15 +21,12 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // BARRA DE BÚSQUEDA CRM
   const [crmSearchQuery, setCrmSearchQuery] = useState('');
 
-  // MODALES
   const [showAddBudgetModal, setShowAddBudgetModal] = useState(false);
   const [showCatalogItemModal, setShowCatalogItemModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   
-  // ÓRDENES
   const [activeWorkOrder, setActiveWorkOrder] = useState<any | null>(null);
   const [woExpenses, setWoExpenses] = useState<any[]>([]);
   const [woAttachments, setWoAttachments] = useState<any[]>([]);
@@ -37,7 +34,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [newExpenseAmount, setNewExpenseAmount] = useState<number | ''>('');
   const [woTab, setWoTab] = useState<'info' | 'gastos' | 'archivos'>('info');
 
-  // PRESUPUESTOS (FORMATO CORRELATIVO ANUAL: PRE-YYYY01, PRE-YYYY02...)
   const [bCode, setBCode] = useState('');
   const [bWorkOrderRef, setBWorkOrderRef] = useState('');
   const [bValidUntil, setBValidUntil] = useState('');
@@ -48,7 +44,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [bPhone, setBPhone] = useState('');
   const [bItems, setBItems] = useState<Array<{ desc: string; qty: number; price: number }>>([{ desc: '', qty: 1, price: 0 }]);
 
-  // IA SCANNER DE PARTES
   const [isScanning, setIsScanning] = useState(false);
 
   const [filteredSuggestions, setFilteredSuggestions] = useState<any[]>([]);
@@ -58,21 +53,18 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [newCatDesc, setNewCatDesc] = useState('');
   const [newCatPrice, setNewCatPrice] = useState<number>(0);
 
-  // CRM MODAL
   const [showCrmModal, setShowCrmModal] = useState(false);
   const [crmTab, setCrmTab] = useState<'datos' | 'historial'>('datos');
   const [crmForm, setCrmForm] = useState({
     id: null, name: '', phone: '', email: '', cif: '', address: '', street: '', street_number: '', postal_code: '', population: '', city: '', country: 'España', company: '', company_cif: '', company_address: '', company_phone: '', admin_contact: '', admin_email: ''
   });
 
-  // FACTURACIÓN Y COBROS
   const [sharingDocument, setSharingDocument] = useState<any | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [invoiceModal, setInvoiceModal] = useState({ show: false, budget: null as any, percentage: 100 });
   const [restInvoiceModal, setRestInvoiceModal] = useState({ show: false, budget: null as any, items: [] as any[], alreadyInvoicedSubtotal: 0, activeItemIndex: null as number | null });
   const [paymentModal, setPaymentModal] = useState({ show: false, invoice: null as any, method: 'Transferencia Bancaria' });
 
-  // STORAGE EN MB
   const [storageUsedMB, setStorageUsedMB] = useState<number>(0);
 
   const docPressTimer = useRef<any>(null);
@@ -83,10 +75,8 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const generateNextBudgetCode = (budgetList = budgets) => {
     const currentYear = new Date().getFullYear();
     const prefix = `PRE-${currentYear}`;
-    
     const yearBudgets = budgetList.filter(b => b.code && b.code.startsWith(prefix));
     let nextNum = 1;
-
     if (yearBudgets.length > 0) {
       const numbers = yearBudgets.map(b => {
         const numPart = b.code.replace(prefix, '');
@@ -95,7 +85,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       });
       nextNum = Math.max(...numbers) + 1;
     }
-
     return `${prefix}${String(nextNum).padStart(2, '0')}`;
   };
 
@@ -171,7 +160,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   };
 
   // =========================================================================
-  // FUNCIÓN: ESCANEAR PARTE A MANO CON IA (OCR Inteligente)
+  // IA SCANNER DE PARTES (COMPRESIÓN DE IMAGEN MEJORADA Y ERRORES CLAROS)
   // =========================================================================
   const handleScanWorkOrder = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -179,45 +168,76 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
     setIsScanning(true);
     try {
-      // 1. Convertimos la imagen a Base64
       const reader = new FileReader();
       reader.readAsDataURL(file);
-      reader.onload = async () => {
-        const base64Image = reader.result;
-
-        // 2. Enviamos la imagen a nuestro propio backend para que la lea la IA
-        const response = await fetch('/api/scan-work-order', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64Image })
-        });
-
-        if (!response.ok) throw new Error('Error al procesar la imagen. Revisa el backend.');
-
-        const data = await response.json();
-
-        // 3. Rellenamos el formulario automáticamente
-        if (data.client_name) setBClient(data.client_name);
-        if (data.client_address) setBAddress(data.client_address);
-        if (data.client_phone) setBPhone(data.client_phone);
-        if (data.work_order_ref) setBWorkOrderRef(data.work_order_ref);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
         
-        if (data.items && data.items.length > 0) {
-          const parsedItems = data.items.map((i: any) => ({
-            desc: i.description || '',
-            qty: Number(i.quantity) || 1,
-            price: Number(i.price) || 0
-          }));
-          setBItems(parsedItems);
-        }
+        img.onload = async () => {
+          try {
+            // 1. Comprimir la foto para que Vercel no la bloquee por ser muy pesada (>4MB)
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 1000;
+            const scaleSize = MAX_WIDTH / img.width;
+            canvas.width = MAX_WIDTH;
+            canvas.height = img.height * scaleSize;
+            
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+            
+            // 60% de calidad en JPEG para que pese menos de 1MB
+            const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
 
-        alert('✅ ¡Datos extraídos por IA! Por favor, revisa que todo esté correcto.');
+            // 2. Llamada a nuestro backend
+            const response = await fetch('/api/scan-work-order', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: compressedBase64 })
+            });
+
+            // 3. Capturar errores específicos
+            if (!response.ok) {
+              let errorMsg = 'Error en el servidor de IA';
+              try {
+                const errorData = await response.json();
+                errorMsg = errorData.error || errorMsg;
+              } catch (parseErr) {
+                errorMsg = `Error ${response.status}: Revisa que la API Route exista y no devuelva HTML.`;
+              }
+              throw new Error(errorMsg);
+            }
+
+            const data = await response.json();
+
+            // 4. Rellenar formulario
+            if (data.client_name) setBClient(data.client_name);
+            if (data.client_address) setBAddress(data.client_address);
+            if (data.client_phone) setBPhone(data.client_phone);
+            if (data.work_order_ref) setBWorkOrderRef(data.work_order_ref);
+            
+            if (data.items && data.items.length > 0) {
+              const parsedItems = data.items.map((i: any) => ({
+                desc: i.description || '',
+                qty: Number(i.quantity) || 1,
+                price: Number(i.price) || 0
+              }));
+              setBItems(parsedItems);
+            }
+
+            alert('✅ ¡Magia completada! Por favor revisa y ajusta los datos extraídos.');
+          } catch (err: any) {
+            alert('❌ La IA detectó un error: ' + err.message);
+          } finally {
+            setIsScanning(false);
+            e.target.value = ''; // Reset file input
+          }
+        };
       };
     } catch (err: any) {
-      alert('Error escaneando el parte: ' + err.message);
-    } finally {
+      alert('❌ Error al cargar la foto: ' + err.message);
       setIsScanning(false);
-      e.target.value = ''; // Limpiamos el input file
+      e.target.value = '';
     }
   };
 
@@ -578,20 +598,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     e.preventDefault();
     try {
       const { data, error } = await supabase.from('budgets').insert([{
-        code: bCode, 
-        work_order_ref: bWorkOrderRef,
-        client: bClient, 
-        client_cif: bCif, 
-        address: bAddress, 
-        valid_until: bValidUntil,
-        subtotal: calculatedSubtotal, 
-        vat: calculatedSubtotal * 0.21, 
-        total: calculatedTotal, 
-        pdf_name: `${bCode}.pdf`,
-        items: bItems, 
-        user_id: user.id, 
-        status: 'pendiente', 
-        type: 'presupuesto'
+        code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
+        subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, pdf_name: `${bCode}.pdf`, items: bItems, 
+        user_id: user.id, status: 'pendiente', type: 'presupuesto'
       }]).select();
 
       if (error) throw error;
@@ -600,9 +609,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         setBudgets(updatedBudgets); 
         setShowAddBudgetModal(false);
         setBCode(generateNextBudgetCode(updatedBudgets));
-        setBWorkOrderRef('');
-        setBClient(''); 
-        setBItems([{ desc: '', qty: 1, price: 0 }]);
+        setBWorkOrderRef(''); setBClient(''); setBItems([{ desc: '', qty: 1, price: 0 }]);
       }
     } catch (err: any) { alert('Error: ' + err.message); }
   };
@@ -715,7 +722,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
   const filteredBudgets = budgets.filter(b => docTab === 'presupuestos' ? b.type !== 'factura' && b.code.startsWith('PRE') : b.type === 'factura' || b.code.startsWith('FAC'));
   
-  // TRAZABILIDAD COMPLETA DEL CLIENTE SELECCIONADO
   const activeClientBudgets = budgets.filter(b => b.client_cif === crmForm.cif || b.client.includes(crmForm.name));
   const activeClientTotalPresupuestado = activeClientBudgets.filter(b => b.type === 'presupuesto').reduce((acc, b) => acc + Number(b.total || 0), 0);
   const activeClientTotalFacturado = activeClientBudgets.filter(b => b.type === 'factura').reduce((acc, b) => acc + Number(b.total || 0), 0);
@@ -755,7 +761,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         </div>
       )}
 
-      {/* CABECERA CON BOTONES */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
         <div><h2 className="text-xl font-black text-slate-800">📁 Panel FSM & CRM</h2></div>
         <div className="flex flex-wrap gap-2">
@@ -778,7 +783,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         <button onClick={() => setDocTab('clientes')} className={`px-4 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ml-auto border ${docTab === 'clientes' ? 'bg-slate-800 text-white border-slate-800' : 'text-slate-700 hover:bg-slate-100 border-slate-300'}`}>👥 CRM Clientes</button>
       </div>
 
-      {/* BARRA DE BÚSQUEDA EXCLUSIVA PARA EL CRM */}
       {docTab === 'clientes' && (
         <div className="shrink-0">
           <div className="relative">
@@ -954,7 +958,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest block">Pendiente de Cobro</span>
                 <span className="font-black text-3xl text-rose-700">{stats.pendiente.toFixed(2)} €</span>
               </div>
-
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
                 <div className="flex justify-between items-center text-xs font-bold">
                   <span className="text-slate-600 flex items-center gap-1.5">💾 Espacio en Disco Utilizado</span>
@@ -968,7 +971,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 </div>
                 <p className="text-[10px] text-slate-400 text-center font-medium">Plan Base Activo. Ampliable a 10 GB / 50 GB.</p>
               </div>
-
             </div>
           </div>
         </div>
