@@ -1076,7 +1076,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         </div>
       )}
 
-      {/* MODAL CREADOR DE PRESUPUESTO (AQUÍ ESTÁ EL BOTÓN DE IA) */}
+      {/* MODAL CREADOR DE PRESUPUESTO (AQUÍ ESTÁN LOS 2 BOTONES DE IA) */}
       {showAddBudgetModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 overflow-y-auto backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto my-auto animate-in zoom-in-95">
@@ -1084,12 +1084,24 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 shrink-0 gap-3">
               <h3 className="font-black text-lg text-slate-800">📄 Creador de Presupuesto</h3>
               <div className="flex items-center gap-2">
-                {/* BOTÓN MÁGICO DE ESCANEAR CON IA SIN CAPTURE ENVIRONMENT */}
-                <label className={`px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black cursor-pointer hover:bg-emerald-100 transition flex items-center gap-2 shadow-sm ${isScanning ? 'opacity-50 pointer-events-none' : ''}`}>
-                  {isScanning ? '⏳ Analizando Imagen...' : '📸 Escanear Parte a Mano'}
-                  <input type="file" accept="image/*" className="hidden" onChange={handleScanWorkOrder} />
-                </label>
-                <button type="button" onClick={() => setShowAddBudgetModal(false)} className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition">✕</button>
+                {/* BOTONES MÁGICOS DE ESCANEAR CON IA */}
+                {isScanning ? (
+                  <span className="px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black shadow-sm">
+                    ⏳ Analizando Imagen...
+                  </span>
+                ) : (
+                  <div className="flex gap-2">
+                    <label className="px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black cursor-pointer hover:bg-emerald-100 transition flex items-center gap-1 shadow-sm" title="Hacer foto nueva">
+                      📸 Cámara
+                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleScanWorkOrder} />
+                    </label>
+                    <label className="px-3 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-black cursor-pointer hover:bg-indigo-100 transition flex items-center gap-1 shadow-sm" title="Elegir de la galería">
+                      🖼️ Galería
+                      <input type="file" accept="image/*" className="hidden" onChange={handleScanWorkOrder} />
+                    </label>
+                  </div>
+                )}
+                <button type="button" onClick={() => setShowAddBudgetModal(false)} className="w-8 h-8 ml-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition">✕</button>
               </div>
             </div>
 
