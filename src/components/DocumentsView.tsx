@@ -35,6 +35,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [woTab, setWoTab] = useState<'info' | 'gastos' | 'archivos'>('info');
 
   // PRESUPUESTOS Y DATOS DEL CLIENTE
+  const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null); // NUEVO: Para saber si creamos o editamos
   const [bCode, setBCode] = useState('');
   const [bWorkOrderRef, setBWorkOrderRef] = useState('');
   const [bValidUntil, setBValidUntil] = useState('');
@@ -46,9 +47,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [bAddress, setBAddress] = useState('');
   const [bEmail, setBEmail] = useState('');
   const [bPhone, setBPhone] = useState('');
-  const [bContact, setBContact] = useState(''); // NUEVO CAMPO: Persona de contacto
+  const [bContact, setBContact] = useState('');
+  const [bBankAccount, setBBankAccount] = useState(''); // NUEVO: Cuenta bancaria
   const [bItems, setBItems] = useState<Array<{ desc: string; qty: number; price: number }>>([{ desc: '', qty: 1, price: 0 }]);
 
+  const [showAdvancedClientFields, setShowAdvancedClientFields] = useState(false); // NUEVO: Plegar/desplegar datos del cliente
   const [isScanning, setIsScanning] = useState(false);
 
   const [filteredSuggestions, setFilteredSuggestions] = useState<any[]>([]);
@@ -61,7 +64,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [showCrmModal, setShowCrmModal] = useState(false);
   const [crmTab, setCrmTab] = useState<'datos' | 'historial'>('datos');
   const [crmForm, setCrmForm] = useState({
-    id: null, name: '', phone: '', email: '', cif: '', address: '', street: '', street_number: '', postal_code: '', population: '', city: '', country: 'España', company: '', company_cif: '', company_address: '', company_phone: '', admin_contact: '', admin_email: ''
+    id: null, name: '', phone: '', email: '', cif: '', address: '', street: '', street_number: '', postal_code: '', population: '', city: '', country: 'España', company: '', company_cif: '', company_address: '', company_phone: '', admin_contact: '', admin_email: '', bank_account: ''
   });
 
   const [sharingDocument, setSharingDocument] = useState<any | null>(null);
@@ -140,7 +143,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       const getFolderBytes = async (prefix = '') => {
         const { data: list, error } = await supabase.storage.from('chat_attachments').list(prefix, { limit: 100 });
         if (error || !list) return;
-
         for (const item of list) {
           if (!item.id) {
             const subPrefix = prefix ? `${prefix}/${item.name}` : item.name;
@@ -158,21 +160,46 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   };
 
   const resetBudgetForm = () => {
-    setBCode(generateNextBudgetCode());
+    setEditingBudgetId(null);
+    setBCode(generateNextBudgetCode(budgets));
     setBClientId(null);
     setBClient('');
     setBCif('');
     setBAddress('');
     setBEmail('');
     setBPhone('');
-    setBContact(''); // Resetear campo de contacto
+    setBContact('');
+    setBBankAccount('');
     setBWorkOrderRef('');
     setBValidUntil('');
     setBItems([{ desc: '', qty: 1, price: 0 }]);
+    setShowAdvancedClientFields(false); // Colapsar por defecto
   };
 
-  const handleOpenAddBudget = () => {
-    resetBudgetForm();
+  // NUEVO: Permite abrir el modal con los datos de un presupuesto ya guardado
+  const handleOpenAddBudget = (budgetToEdit: any = null) => {
+    if (budgetToEdit && budgetToEdit.id) {
+      setEditingBudgetId(budgetToEdit.id);
+      setBCode(budgetToEdit.code);
+      setBWorkOrderRef(budgetToEdit.work_order_ref || '');
+      setBValidUntil(budgetToEdit.valid_until || '');
+      setBClient(budgetToEdit.client || '');
+      setBCif(budgetToEdit.client_cif || '');
+      setBAddress(budgetToEdit.address || '');
+      
+      // Buscar cliente en CRM para rellenar los datos extra
+      const foundClient = crmClients.find(c => c.name === budgetToEdit.client || (c.company && `${c.name} (${c.company})` === budgetToEdit.client) || c.cif === budgetToEdit.client_cif);
+      setBClientId(foundClient ? foundClient.id : null);
+      setBEmail(foundClient?.email || foundClient?.admin_email || '');
+      setBPhone(foundClient?.phone || foundClient?.company_phone || '');
+      setBContact(foundClient?.admin_contact || '');
+      setBBankAccount(foundClient?.bank_account || '');
+      
+      setBItems(budgetToEdit.items && budgetToEdit.items.length > 0 ? budgetToEdit.items : [{ desc: '', qty: 1, price: 0 }]);
+      setShowAdvancedClientFields(false); // Colapsado por defecto para vista rápida
+    } else {
+      resetBudgetForm();
+    }
     setShowAddBudgetModal(true);
   };
 
@@ -206,7 +233,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
 
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 25000);
+            const timeoutId = setTimeout(() => controller.abort(), 35000);
 
             const response = await fetch('/api/scan-work-order', {
               method: 'POST',
@@ -242,12 +269,14 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               setBPhone(foundClient.phone || foundClient.company_phone || data.client_phone || '');
               setBEmail(foundClient.email || foundClient.admin_email || '');
               setBContact(foundClient.admin_contact || data.client_contact || '');
+              setBBankAccount(foundClient.bank_account || data.client_bank || '');
             } else {
               setBClientId(null);
               if (data.client_name) setBClient(data.client_name);
               if (data.client_address) setBAddress(data.client_address);
               if (data.client_phone) setBPhone(data.client_phone);
               if (data.client_contact) setBContact(data.client_contact);
+              if (data.client_bank) setBBankAccount(data.client_bank);
             }
 
             if (data.work_order_ref) setBWorkOrderRef(data.work_order_ref);
@@ -259,6 +288,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 price: Number(i.price) || 0
               }));
               setBItems(parsedItems);
+            }
+
+            // Desplegar datos si la IA extrajo algo extra para que el usuario lo vea
+            if (data.client_address || data.client_bank || data.client_contact) {
+              setShowAdvancedClientFields(true);
             }
 
             alert('✅ ¡Datos extraídos por IA! Por favor revisa y ajusta la información.');
@@ -284,8 +318,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const handleClientInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value; 
     setBClient(val);
-    
-    // Si el usuario teclea manualmente, desconectamos el ID para que cuente como cliente nuevo
     setBClientId(null);
     
     if (val.trim().length > 0) {
@@ -307,7 +339,8 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setBAddress(cli.address || ''); 
     setBEmail(cli.email || cli.admin_email || ''); 
     setBPhone(cli.phone || cli.company_phone || '');
-    setBContact(cli.admin_contact || ''); // Cargar el contacto del CRM
+    setBContact(cli.admin_contact || '');
+    setBBankAccount(cli.bank_account || '');
     setShowSuggestions(false);
   };
 
@@ -317,18 +350,17 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const calculatedTotal = calculatedSubtotal * 1.21;
 
   // =========================================================================
-  // GUARDAR PRESUPUESTO + GESTIÓN INTELIGENTE DEL CRM
+  // GUARDAR PRESUPUESTO + ACTUALIZAR FICHA CRM
   // =========================================================================
   const handleSaveBudget = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       let finalClientId = bClientId;
 
-      // 1. Lógica de guardado en el CRM
+      // 1. Guardado en el CRM
       if (!bClientId && bClient.trim() !== '') {
-        // ES UN CLIENTE NUEVO -> Lo creamos automático en el CRM
         const newClientPayload = {
-          name: bClient, cif: bCif, address: bAddress, email: bEmail, phone: bPhone, admin_contact: bContact, user_id: user.id
+          name: bClient, cif: bCif, address: bAddress, email: bEmail, phone: bPhone, admin_contact: bContact, bank_account: bBankAccount, user_id: user.id
         };
         const { data: newCli } = await supabase.from('clients').insert([newClientPayload]).select();
         if (newCli) {
@@ -336,7 +368,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
           setCrmClients(prev => [...prev, newCli[0]]);
         }
       } else if (bClientId) {
-        // ES UN CLIENTE EXISTENTE -> Comparamos para ver si han modificado algo
         const original = crmClients.find(c => c.id === bClientId);
         if (original) {
           const originalName = original.company ? `${original.name} (${original.company})` : original.name;
@@ -345,19 +376,20 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
           const originalEmail = original.email || original.admin_email || '';
           const originalPhone = original.phone || original.company_phone || '';
           const originalContact = original.admin_contact || '';
+          const originalBank = original.bank_account || '';
 
-          // Comprobamos si hay alguna diferencia entre lo que había y lo que han tecleado en el formulario
-          if (bClient !== originalName || bCif !== originalCif || bAddress !== originalAddress || bEmail !== originalEmail || bPhone !== originalPhone || bContact !== originalContact) {
+          if (bClient !== originalName || bCif !== originalCif || bAddress !== originalAddress || bEmail !== originalEmail || bPhone !== originalPhone || bContact !== originalContact || bBankAccount !== originalBank) {
             const wantToUpdate = window.confirm('Has modificado los datos de este cliente en el formulario.\n\n¿Quieres guardar estos cambios permanentemente en su ficha del CRM?');
             
             if (wantToUpdate) {
               const updatePayload = {
-                name: bClient.includes('(') ? bClient.split(' (')[0].trim() : bClient, // Limpia el nombre si tenía empresa
+                name: bClient.includes('(') ? bClient.split(' (')[0].trim() : bClient,
                 cif: bCif,
                 address: bAddress,
                 email: bEmail,
                 phone: bPhone,
-                admin_contact: bContact // Guardamos el nuevo contacto en su ficha
+                admin_contact: bContact,
+                bank_account: bBankAccount
               };
               const { data: updatedCli } = await supabase.from('clients').update(updatePayload).eq('id', bClientId).select();
               if (updatedCli) {
@@ -368,20 +400,29 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         }
       }
 
-      // 2. Guardado del Presupuesto
-      const { data, error } = await supabase.from('budgets').insert([{
+      // 2. Guardado del Presupuesto (Insertar o Actualizar)
+      const budgetPayload = {
         code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
         subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, pdf_name: `${bCode}.pdf`, items: bItems, 
-        user_id: user.id, status: 'pendiente', type: 'presupuesto'
-      }]).select();
+        user_id: user.id, status: editingBudgetId ? budgets.find(b=>b.id===editingBudgetId)?.status || 'pendiente' : 'pendiente', type: 'presupuesto'
+      };
 
-      if (error) throw error;
-      if (data) {
-        const updatedBudgets = [data[0], ...budgets];
-        setBudgets(updatedBudgets); 
-        setShowAddBudgetModal(false);
-        resetBudgetForm();
-        setBCode(generateNextBudgetCode(updatedBudgets)); // Pre-generamos el siguiente
+      if (editingBudgetId) {
+        const { data, error } = await supabase.from('budgets').update(budgetPayload).eq('id', editingBudgetId).select();
+        if (error) throw error;
+        if (data) {
+          setBudgets(prev => prev.map(b => b.id === editingBudgetId ? data[0] : b));
+          setShowAddBudgetModal(false);
+          resetBudgetForm();
+        }
+      } else {
+        const { data, error } = await supabase.from('budgets').insert([budgetPayload]).select();
+        if (error) throw error;
+        if (data) {
+          setBudgets(prev => [data[0], ...prev]);
+          setShowAddBudgetModal(false);
+          resetBudgetForm();
+        }
       }
     } catch (err: any) { alert('Error: ' + err.message); }
   };
@@ -410,313 +451,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       await supabase.from('budgets').update({ status: 'rechazado' }).eq('id', id);
       setBudgets(prev => prev.map(b => b.id === id ? { ...b, status: 'rechazado' } : b));
     } catch (err: any) { alert('Error: ' + err.message); }
-  };
-
-  const generateNextInvoiceCode = () => {
-    const invoices = budgets.filter(b => b.type === 'factura' || (b.code && b.code.startsWith('FAC-')));
-    let nextNum = userProfile?.invoice_start_num || 1;
-    if (invoices.length > 0) {
-      const maxExisting = Math.max(...invoices.map(i => {
-        const m = i.code.match(/FAC-\d{4}-(\d+)/);
-        return m ? parseInt(m[1], 10) : 0;
-      }));
-      if (maxExisting >= nextNum) nextNum = maxExisting + 1;
-    }
-    return `FAC-${new Date().getFullYear()}-${String(nextNum).padStart(4, '0')}`;
-  };
-
-  const handleOpenInvoiceModal = (budget: any) => {
-    setInvoiceModal({ show: true, budget, percentage: 100 });
-  };
-
-  const handleConfirmInvoice = async () => {
-    const { budget, percentage } = invoiceModal;
-    try {
-      const newCode = generateNextInvoiceCode();
-      const pct = percentage / 100;
-      const newSubtotal = Number(budget.subtotal) * pct;
-      const newVat = Number(budget.vat) * pct;
-      const newTotal = Number(budget.total) * pct;
-      
-      if (percentage === 100) {
-        const { error } = await supabase.from('budgets').update({ code: newCode, type: 'factura', status: 'pendiente_cobro' }).eq('id', budget.id);
-        if (error) throw error;
-        setBudgets(prev => prev.map(b => b.id === budget.id ? { ...b, code: newCode, type: 'factura', status: 'pendiente_cobro' } : b));
-      } else {
-        const newItems = [{ desc: `Facturación parcial (Anticipo ${percentage}%) de ${budget.code}`, qty: 1, price: newSubtotal }];
-        const { data: newFactura, error } = await supabase.from('budgets').insert([{
-          code: newCode, client: budget.client, client_cif: budget.client_cif, address: budget.address,
-          work_order_ref: budget.work_order_ref || '',
-          subtotal: newSubtotal, vat: newVat, total: newTotal, pdf_name: `${newCode}.pdf`,
-          items: newItems, user_id: user.id, status: 'pendiente_cobro', type: 'factura', parent_id: budget.id
-        }]).select();
-
-        if (error) throw error;
-        await supabase.from('budgets').update({ status: 'parcialmente_facturado' }).eq('id', budget.id);
-        setBudgets(prev => {
-          const updated = prev.map(b => b.id === budget.id ? { ...b, status: 'parcialmente_facturado' } : b);
-          return [newFactura[0], ...updated];
-        });
-      }
-
-      alert(`Factura generada con éxito (${newCode}).`);
-      setInvoiceModal({ show: false, budget: null, percentage: 100 });
-      setDocTab('facturas');
-    } catch (err: any) { alert('Error al facturar: ' + err.message); }
-  };
-
-  const handleOpenRestInvoiceModal = (budget: any) => {
-    const relatedInvoices = budgets.filter(b => b.type === 'factura' && b.parent_id === budget.id);
-    const alreadyInvoicedSubtotal = relatedInvoices.reduce((acc, inv) => acc + Number(inv.subtotal), 0);
-    setRestInvoiceModal({ show: true, budget, items: [...(budget.items || [])], alreadyInvoicedSubtotal, activeItemIndex: null });
-  };
-
-  const handleConfirmRestInvoice = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const { budget, items, alreadyInvoicedSubtotal } = restInvoiceModal;
-    try {
-      const newCode = generateNextInvoiceCode();
-      const currentSubtotal = items.reduce((acc, item) => acc + (Number(item.qty) || 0) * (Number(item.price) || 0), 0);
-      const finalSubtotal = currentSubtotal - alreadyInvoicedSubtotal;
-      const finalVat = finalSubtotal * 0.21;
-      const finalTotal = finalSubtotal + finalVat;
-
-      const finalItems = [...items, { desc: `Descuento Anticipo ya facturado (${budget.code})`, qty: 1, price: -alreadyInvoicedSubtotal }];
-
-      const { data: newFactura, error } = await supabase.from('budgets').insert([{
-        code: newCode, client: budget.client, client_cif: budget.client_cif, address: budget.address,
-        work_order_ref: budget.work_order_ref || '',
-        subtotal: finalSubtotal, vat: finalVat, total: finalTotal, pdf_name: `${newCode}.pdf`,
-        items: finalItems, user_id: user.id, status: 'pendiente_cobro', type: 'factura', parent_id: budget.id
-      }]).select();
-
-      if (error) throw error;
-
-      await supabase.from('budgets').update({ status: 'facturado', items: items, subtotal: currentSubtotal, vat: currentSubtotal*0.21, total: currentSubtotal*1.21 }).eq('id', budget.id);
-
-      setBudgets(prev => {
-        const updated = prev.map(b => b.id === budget.id ? { ...b, status: 'facturado', items: items, subtotal: currentSubtotal, vat: currentSubtotal*0.21, total: currentSubtotal*1.21 } : b);
-        return [newFactura[0], ...updated];
-      });
-
-      alert(`Factura final de obra generada con éxito (${newCode}).`);
-      setRestInvoiceModal({ show: false, budget: null, items: [], alreadyInvoicedSubtotal: 0, activeItemIndex: null });
-      setDocTab('facturas');
-    } catch (err: any) { alert('Error al facturar el resto: ' + err.message); }
-  };
-
-  const checkSequentialIntegrity = (code: string) => {
-    const invoices = budgets.filter(doc => doc.type === 'factura' || (doc.code && doc.code.startsWith('FAC-')));
-    const maxNum = Math.max(...invoices.map(i => { const m = i.code.match(/FAC-\d{4}-(\d+)/); return m ? parseInt(m[1], 10) : 0; }));
-    const currentMatch = code.match(/FAC-\d{4}-(\d+)/);
-    const currentNum = currentMatch ? parseInt(currentMatch[1], 10) : 0;
-    return { isLast: currentNum === maxNum, maxNum };
-  };
-
-  const handleRevertToBudget = async (b: any) => {
-    const integrity = checkSequentialIntegrity(b.code);
-    if (!integrity.isLast) {
-      alert(`⚠️ CORRELATIVIDAD: Solo puedes devolver a presupuesto la ÚLTIMA factura generada (nº ${integrity.maxNum}).`);
-      return;
-    }
-
-    if (!confirm(`¿Devolver la factura ${b.code} a estado de Presupuesto?`)) return;
-    try {
-      if (b.parent_id) {
-        await supabase.from('budgets').delete().eq('id', b.id);
-        await supabase.from('budgets').update({ status: 'pendiente' }).eq('id', b.parent_id);
-        setBudgets(prev => prev.filter(doc => doc.id !== b.id).map(doc => doc.id === b.parent_id ? { ...doc, status: 'pendiente' } : doc));
-      } else {
-        const revertedCode = b.code.replace('FAC-', 'PRE-');
-        await supabase.from('budgets').update({ type: 'presupuesto', code: revertedCode, status: 'pendiente' }).eq('id', b.id);
-        setBudgets(prev => prev.map(doc => doc.id === b.id ? { ...doc, type: 'presupuesto', code: revertedCode, status: 'pendiente' } : doc));
-      }
-      alert('Documento devuelto a Presupuesto limpiamente.');
-      setDocTab('presupuestos');
-    } catch (err: any) { alert('Error al revertir: ' + err.message); }
-  };
-
-  const handleDocPressStart = (b: any) => {
-    isDocLongPress.current = false;
-    docPressTimer.current = setTimeout(() => {
-      isDocLongPress.current = true;
-      handleDeleteDocument(b);
-    }, 5000);
-  };
-
-  const handleDocPressEnd = () => {
-    if (docPressTimer.current) clearTimeout(docPressTimer.current);
-  };
-
-  const handleDeleteDocument = async (b: any) => {
-    if (b.type === 'factura') {
-      const integrity = checkSequentialIntegrity(b.code);
-      if (!integrity.isLast) {
-        alert(`⚠️ CORRELATIVIDAD: Solo puedes anular la ÚLTIMA factura generada (nº ${integrity.maxNum}).`);
-        return;
-      }
-    } else {
-      const hasInvoices = budgets.some(doc => doc.type === 'factura' && (doc.parent_id === b.id || doc.id === b.id));
-      if (hasInvoices) {
-        alert('⚠️ NO SE PUEDE ELIMINAR: Este presupuesto ya tiene facturas emitidas. Para borrarlo, primero debes anular o revertir sus facturas.');
-        return;
-      }
-
-      const linkedOrder = workOrders.find(wo => wo.budget_id === b.id);
-      if (linkedOrder) {
-        const hasExpenses = allExpenses.some(exp => exp.work_order_id === linkedOrder.id);
-        const hasAttachments = allAttachments.some(att => att.work_order_id === linkedOrder.id);
-
-        if (hasExpenses || hasAttachments) {
-          alert('⚠️ NO SE PUEDE ELIMINAR: La orden de trabajo vinculada contiene gastos o archivos guardados. Debes eliminar primero todos los apuntes de la obra para poder borrar el presupuesto.');
-          return;
-        }
-      }
-    }
-
-    if (!confirm(`¿Estás seguro de ELIMINAR definitivamente el documento ${b.code}?`)) return;
-    
-    try {
-      if (b.parent_id) {
-         await supabase.from('budgets').update({ status: 'pendiente' }).eq('id', b.parent_id);
-      }
-      if (b.type !== 'factura') {
-         await supabase.from('work_orders').delete().eq('budget_id', b.id);
-      }
-      
-      await supabase.from('budgets').delete().eq('id', b.id);
-      
-      setBudgets(prev => prev.filter(d => d.id !== b.id));
-      setWorkOrders(prev => prev.filter(wo => wo.budget_id !== b.id));
-      
-      calculateStorageSize();
-      alert('Documento eliminado correctamente.');
-    } catch (err: any) { 
-      alert('Error al borrar: ' + err.message); 
-    }
-  };
-
-  const handleOpenPaymentModal = (invoice: any) => {
-    setPaymentModal({ show: true, invoice, method: 'Transferencia Bancaria' });
-  };
-
-  const handleConfirmPayment = async () => {
-    const { invoice, method } = paymentModal;
-    try {
-      await supabase.from('budgets').update({ status: 'cobrada', payment_method: method }).eq('id', invoice.id);
-      setBudgets(prev => prev.map(b => b.id === invoice.id ? { ...b, status: 'cobrada', payment_method: method } : b));
-      setPaymentModal({ show: false, invoice: null, method: 'Transferencia Bancaria' });
-    } catch (err: any) { alert('Error al cobrar: ' + err.message); }
-  };
-
-  const openWorkOrderPanel = async (order: any) => {
-    setActiveWorkOrder(order);
-    setWoTab('info');
-    try {
-      const [resExp, resAtt] = await Promise.all([
-        supabase.from('work_expenses').select('*').eq('work_order_id', order.id),
-        supabase.from('attachments').select('*').eq('work_order_id', order.id)
-      ]);
-      setWoExpenses(resExp?.data || []);
-      setWoAttachments(resAtt?.data || []);
-    } catch (err) {
-      console.error('Error cargando obra:', err);
-      setWoExpenses([]);
-      setWoAttachments([]);
-    }
-  };
-
-  const handleFinishWorkOrder = async (id: string) => {
-    if (!confirm('¿Finalizar orden? Ya no aparecerá en la lista activa.')) return;
-    try {
-      await supabase.from('work_orders').update({ status: 'finalizada' }).eq('id', id);
-      setWorkOrders(prev => prev.map(wo => wo.id === id ? { ...wo, status: 'finalizada' } : wo));
-      setActiveWorkOrder(null);
-    } catch (err: any) { alert('Error: ' + err.message); }
-  };
-
-  const handleAddExpense = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeWorkOrder) return;
-    try {
-      const { data, error } = await supabase.from('work_expenses').insert([{ 
-        work_order_id: activeWorkOrder.id, 
-        description: newExpenseDesc, 
-        amount: Number(newExpenseAmount) 
-      }]).select();
-      
-      if (error) throw error;
-      if (data) {
-        setWoExpenses(prev => [...prev, data[0]]);
-        setAllExpenses(prev => [...prev, data[0]]);
-      }
-      setNewExpenseDesc(''); 
-      setNewExpenseAmount('');
-    } catch (err: any) { alert('Error guardando gasto: ' + err.message); }
-  };
-
-  const handleUploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !activeWorkOrder) return;
-    try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const cleanClientName = (activeWorkOrder.client_name || 'Sin_Cliente').replace(/[^a-zA-Z0-9]/g, '_');
-      
-      const filePath = `clientes_crm/${cleanClientName}/proyecto_${activeWorkOrder.budget_id}/archivos_obra/${fileName}`;
-      
-      const { error: uploadError } = await supabase.storage.from('chat_attachments').upload(filePath, file);
-      if (uploadError) throw uploadError;
-      const { data: publicData } = supabase.storage.from('chat_attachments').getPublicUrl(filePath);
-      const { data: attData } = await supabase.from('attachments').insert([{ work_order_id: activeWorkOrder.id, file_name: file.name, file_url: publicData.publicUrl, type: 'archivo' }]).select();
-      if (attData) {
-        setWoAttachments(prev => [...prev, attData[0]]);
-        setAllAttachments(prev => [...prev, attData[0]]);
-      }
-      calculateStorageSize();
-    } catch (err: any) { alert('Error al subir: ' + err.message); }
-  };
-
-  const handleDeleteAttachment = async (id: string) => {
-    if (!confirm('¿Borrar este archivo para liberar espacio en disco?')) return;
-    try {
-      await supabase.from('attachments').delete().eq('id', id);
-      setWoAttachments(prev => prev.filter(a => a.id !== id));
-      setAllAttachments(prev => prev.filter(a => a.id !== id));
-      calculateStorageSize();
-    } catch (err) {}
-  };
-
-  const openNewCrmModal = () => {
-    setCrmForm({ id: null, name: '', phone: '', email: '', cif: '', address: '', street: '', street_number: '', postal_code: '', population: '', city: '', country: 'España', company: '', company_cif: '', company_address: '', company_phone: '', admin_contact: '', admin_email: '' });
-    setCrmTab('datos'); setShowCrmModal(true);
-  };
-
-  const openEditCrmModal = (client: any) => { 
-    setCrmForm({
-      id: client.id, name: client.name || '', phone: client.phone || '', email: client.email || '', cif: client.cif || '', address: client.address || '',
-      street: client.street || '', street_number: client.street_number || '', postal_code: client.postal_code || '', population: client.population || '', city: client.city || '', country: client.country || 'España',
-      company: client.company || '', company_cif: client.company_cif || '', company_address: client.company_address || '', company_phone: client.company_phone || '', admin_contact: client.admin_contact || '', admin_email: client.admin_email || ''
-    });
-    setCrmTab('datos'); setShowCrmModal(true); 
-  };
-
-  const handleSaveCrmClient = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const gpsAddressParts = [crmForm.street, crmForm.street_number, crmForm.postal_code, crmForm.population, crmForm.city, crmForm.country].filter(Boolean);
-    const finalGpsAddress = gpsAddressParts.join(', ') || crmForm.address;
-    const payload = { ...crmForm, address: finalGpsAddress, user_id: user.id };
-    delete payload.id;
-    try {
-      if (crmForm.id) {
-        const { data } = await supabase.from('clients').update(payload).eq('id', crmForm.id).select();
-        if (data) setCrmClients(prev => prev.map(c => c.id === crmForm.id ? data[0] : c));
-      } else {
-        const { data } = await supabase.from('clients').insert([payload]).select();
-        if (data) setCrmClients(prev => [...prev, data[0]]);
-      }
-      setShowCrmModal(false);
-    } catch (err: any) { alert('Error guardando cliente: ' + err.message); }
   };
 
   const handleSaveCatalogItem = async (e: React.FormEvent) => {
@@ -862,7 +596,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             <>
               <button onClick={() => setShowStatsModal(true)} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold shadow-md hover:bg-slate-900 transition">📊 Estadísticas</button>
               <button onClick={() => setShowCatalogItemModal(true)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold border hover:bg-slate-200 transition">+ Partida</button>
-              <button onClick={handleOpenAddBudget} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold shadow-md hover:bg-indigo-700 transition">+ Presupuesto</button>
+              <button onClick={() => handleOpenAddBudget(null)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold shadow-md hover:bg-indigo-700 transition">+ Presupuesto</button>
             </>
           )}
         </div>
@@ -961,7 +695,13 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               onTouchStart={() => handleDocPressStart(b)}
               onTouchEnd={handleDocPressEnd}
               onTouchMove={handleDocPressEnd}
-              className={`p-4 bg-white border border-slate-200 rounded-xl shadow-sm space-y-3 relative overflow-hidden transition select-none ${b.status === 'cobrada' ? 'border-emerald-300 bg-emerald-50/20' : ''}`}
+              onClick={() => {
+                // Hacer click abre el modo edición si es presupuesto pendiente
+                if (b.type === 'presupuesto' && (!b.status || b.status === 'pendiente')) {
+                  handleOpenAddBudget(b);
+                }
+              }}
+              className={`p-4 bg-white border border-slate-200 rounded-xl shadow-sm space-y-3 relative overflow-hidden transition select-none ${b.type === 'presupuesto' && (!b.status || b.status === 'pendiente') ? 'cursor-pointer hover:border-indigo-400 hover:shadow-md' : ''} ${b.status === 'cobrada' ? 'border-emerald-300 bg-emerald-50/20' : ''}`}
             >
               {b.status === 'aceptado' && <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500"></div>}
               {b.status === 'rechazado' && <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-500"></div>}
@@ -989,31 +729,32 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               </div>
               
               <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-100 pl-2">
-                <button onClick={() => setSharingDocument(b)} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 transition text-white rounded-lg text-[11px] font-bold shadow-md mr-auto">📤 Enviar PDF</button>
+                <button onClick={(e) => { e.stopPropagation(); setSharingDocument(b); }} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 transition text-white rounded-lg text-[11px] font-bold shadow-md mr-auto">📤 Enviar PDF</button>
                 {docTab === 'presupuestos' && (b.status === 'pendiente' || !b.status) && (
                   <>
-                    <button onClick={() => handleRejectBudget(b.id)} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 transition text-rose-700 rounded-lg text-[11px] font-bold border border-rose-200">Rechazar</button>
-                    <button onClick={() => handleAcceptBudget(b)} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 transition text-white rounded-lg text-[11px] font-bold shadow-md">Aceptar Obra</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleOpenAddBudget(b); }} className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 transition text-indigo-700 rounded-lg text-[11px] font-bold border border-indigo-200">✏️ Editar</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleRejectBudget(b.id); }} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 transition text-rose-700 rounded-lg text-[11px] font-bold border border-rose-200">Rechazar</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleAcceptBudget(b); }} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 transition text-white rounded-lg text-[11px] font-bold shadow-md">Aceptar Obra</button>
                   </>
                 )}
                 {docTab === 'presupuestos' && b.status === 'aceptado' && (
                   <>
-                    <button onClick={() => setDocTab('ordenes')} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 transition text-amber-800 rounded-lg text-[11px] font-bold border border-amber-200">🛠️ Ver Obra</button>
-                    <button onClick={() => handleOpenInvoiceModal(b)} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg text-[11px] font-bold shadow-md">🧾 Facturar</button>
+                    <button onClick={(e) => { e.stopPropagation(); setDocTab('ordenes'); }} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 transition text-amber-800 rounded-lg text-[11px] font-bold border border-amber-200">🛠️ Ver Obra</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleOpenInvoiceModal(b); }} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg text-[11px] font-bold shadow-md">🧾 Facturar</button>
                   </>
                 )}
                 {docTab === 'presupuestos' && b.status === 'parcialmente_facturado' && (
                   <>
-                    <button onClick={() => handleOpenRestInvoiceModal(b)} className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 transition text-white rounded-lg text-[11px] font-bold shadow-md">🧾 Facturar Resto</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleOpenRestInvoiceModal(b); }} className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 transition text-white rounded-lg text-[11px] font-bold shadow-md">🧾 Facturar Resto</button>
                   </>
                 )}
                 {docTab === 'facturas' && (
                   <>
                     {b.status !== 'cobrada' && (
-                      <button onClick={() => handleOpenPaymentModal(b)} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 transition text-white rounded-lg text-[11px] font-bold shadow-sm">💶 Cobrar</button>
+                      <button onClick={(e) => { e.stopPropagation(); handleOpenPaymentModal(b); }} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 transition text-white rounded-lg text-[11px] font-bold shadow-sm">💶 Cobrar</button>
                     )}
-                    <button onClick={() => handleRevertToBudget(b)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg text-[11px] font-bold border border-slate-300">🔄 Volver a Presup.</button>
-                    <button onClick={() => handleGeneratePdfAction(b, 'download')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg text-[11px] font-bold shadow-sm">⬇️ PDF</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleRevertToBudget(b); }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg text-[11px] font-bold border border-slate-300">🔄 Volver a Presup.</button>
+                    <button onClick={(e) => { e.stopPropagation(); handleGeneratePdfAction(b, 'download'); }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg text-[11px] font-bold shadow-sm">⬇️ PDF</button>
                   </>
                 )}
               </div>
@@ -1022,13 +763,15 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         )}
       </div>
 
-      {/* MODAL CREADOR DE PRESUPUESTO CON EL FORMULARIO INTEGRAL */}
+      {/* MODAL CREADOR/EDITOR DE PRESUPUESTO */}
       {showAddBudgetModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 overflow-y-auto backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto my-auto animate-in zoom-in-95">
             
             <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 shrink-0 gap-3">
-              <h3 className="font-black text-lg text-slate-800">📄 Creador de Presupuesto</h3>
+              <h3 className="font-black text-lg text-slate-800">
+                {editingBudgetId ? '✏️ Editar Presupuesto' : '📄 Creador de Presupuesto'}
+              </h3>
               <div className="flex items-center gap-2">
                 {isScanning ? (
                   <span className="px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black shadow-sm">
@@ -1052,62 +795,86 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
             <form onSubmit={handleSaveBudget} className="space-y-4 text-xs">
               
-              {/* NUEVA SECCIÓN: DATOS DEL CLIENTE INTEGRALES */}
+              {/* DATOS DEL CLIENTE INTEGRALES Y COLAPSABLES */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
-                <div className="flex justify-between items-end border-b border-slate-200 pb-2 mb-2">
+                <div className="flex justify-between items-center border-b border-slate-200 pb-2 mb-2">
                   <h4 className="font-black text-indigo-700 text-xs uppercase tracking-widest">Datos del Cliente</h4>
-                  {bClientId ? (
-                    <span className="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold">✅ Vinculado a CRM</span>
-                  ) : (
-                    <span className="text-[9px] bg-amber-100 text-amber-700 px-2 py-1 rounded font-bold">🆕 Nuevo Cliente (Se guardará)</span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {bClientId ? (
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold">✅ Vinculado a CRM</span>
+                    ) : (
+                      <span className="text-[9px] bg-amber-100 text-amber-700 px-2 py-1 rounded font-bold">🆕 Nuevo Cliente</span>
+                    )}
+                    <button type="button" onClick={() => setShowAdvancedClientFields(!showAdvancedClientFields)} className="text-[9px] bg-slate-200 text-slate-700 px-2 py-1 rounded font-bold hover:bg-slate-300 transition">
+                      {showAdvancedClientFields ? 'Colapsar ▲' : '✏️ Editar Datos Completos ▼'}
+                    </button>
+                  </div>
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative">
-                  <div className="sm:col-span-2 relative">
-                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Nombre o Empresa *</label>
-                    <input 
-                      type="text" required 
-                      placeholder="Escribe para buscar un cliente existente o escanea un parte..." 
-                      value={bClient} 
-                      onChange={handleClientInput} 
-                      onFocus={() => bClient.trim() && setShowSuggestions(true)} 
-                      onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} 
-                      className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 font-bold outline-none transition" 
-                    />
-                    {showSuggestions && filteredSuggestions.length > 0 && (
-                      <div className="absolute top-[60px] z-50 w-full bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
-                        {filteredSuggestions.map(cli => (
-                          <div key={cli.id} onClick={() => handleSelectSuggestion(cli)} className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 font-bold transition flex justify-between items-center">
-                            <span>{cli.company ? `${cli.name} (${cli.company})` : cli.name}</span>
-                            <span className="text-slate-400 font-normal">{cli.phone}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">CIF / NIF</label>
-                    <input type="text" value={bCif} onChange={e => setBCif(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition font-mono" />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Teléfono</label>
-                    <input type="tel" value={bPhone} onChange={e => setBPhone(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition font-mono" />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Correo Electrónico</label>
-                    <input type="email" value={bEmail} onChange={e => setBEmail(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
-                  </div>
-                  {/* NUEVO CAMPO: Persona de contacto */}
-                  <div>
-                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Persona de Contacto</label>
-                    <input type="text" placeholder="Ej. Juan, Marta..." value={bContact} onChange={e => setBContact(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Dirección Completa</label>
-                    <input type="text" value={bAddress} onChange={e => setBAddress(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
-                  </div>
+                <div className="relative">
+                  <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Nombre o Empresa *</label>
+                  <input 
+                    type="text" required 
+                    placeholder="Escribe para buscar un cliente existente o escanea un parte..." 
+                    value={bClient} 
+                    onChange={handleClientInput} 
+                    onFocus={() => bClient.trim() && setShowSuggestions(true)} 
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} 
+                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 font-bold outline-none transition" 
+                  />
+                  {showSuggestions && filteredSuggestions.length > 0 && (
+                    <div className="absolute top-[60px] z-50 w-full bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                      {filteredSuggestions.map(cli => (
+                        <div key={cli.id} onMouseDown={() => handleSelectSuggestion(cli)} className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 font-bold transition flex justify-between items-center">
+                          <span>{cli.company ? `${cli.name} (${cli.company})` : cli.name}</span>
+                          <span className="text-slate-400 font-normal">{cli.phone}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
+
+                {/* VISTA RÁPIDA (Resumen si está colapsado y hay datos) */}
+                {!showAdvancedClientFields && (bCif || bPhone || bAddress || bEmail || bBankAccount) && (
+                  <div className="text-[10px] text-slate-500 font-medium bg-white p-2.5 rounded border border-slate-200">
+                    {bCif && <span className="mr-3"><strong>CIF:</strong> {bCif}</span>}
+                    {bPhone && <span className="mr-3"><strong>Tel:</strong> {bPhone}</span>}
+                    {bEmail && <span className="mr-3"><strong>Email:</strong> {bEmail}</span>}
+                    {bContact && <span className="mr-3"><strong>Contacto:</strong> {bContact}</span>}
+                    {bBankAccount && <span className="mr-3"><strong>IBAN:</strong> {bBankAccount}</span>}
+                    {bAddress && <div className="mt-1 truncate"><strong>Dir:</strong> {bAddress}</div>}
+                  </div>
+                )}
+
+                {/* CAMPOS AVANZADOS (Desplegables) */}
+                {showAdvancedClientFields && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 pt-3 border-t border-slate-200">
+                    <div>
+                      <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">CIF / NIF</label>
+                      <input type="text" value={bCif} onChange={e => setBCif(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition font-mono" />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Teléfono</label>
+                      <input type="tel" value={bPhone} onChange={e => setBPhone(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition font-mono" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Correo Electrónico</label>
+                      <input type="email" value={bEmail} onChange={e => setBEmail(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Persona de Contacto</label>
+                      <input type="text" placeholder="Ej. Juan, Marta..." value={bContact} onChange={e => setBContact(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Cuenta Bancaria (IBAN)</label>
+                      <input type="text" placeholder="ESXX XXXX XXXX..." value={bBankAccount} onChange={e => setBBankAccount(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition font-mono" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Dirección Completa</label>
+                      <input type="text" value={bAddress} onChange={e => setBAddress(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* SECCIÓN DEL PROYECTO */}
@@ -1137,7 +904,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                     <input type="text" value={item.desc} onChange={e => { const u = [...bItems]; u[index].desc = e.target.value; setBItems(u); }} onFocus={() => setActiveItemIndex(index)} onBlur={() => setTimeout(() => setActiveItemIndex(null), 200)} className="flex-1 p-2 border border-slate-300 rounded-md focus:border-indigo-500 focus:outline-none transition" placeholder="Descripción..." />
                     {activeItemIndex === index && getFilteredCatalog(item.desc).length > 0 && (
                       <div className="absolute top-10 z-50 w-full bg-white border border-slate-200 shadow-xl max-h-40 overflow-y-auto rounded-lg">
-                        {getFilteredCatalog(item.desc).map(cat => <div key={cat.id} onClick={() => { const u = [...bItems]; u[index].desc = cat.description; u[index].price = cat.price; setBItems(u); setActiveItemIndex(null); }} className="p-3 hover:bg-indigo-50 cursor-pointer font-medium border-b border-slate-100 transition">{cat.description} <span className="font-black text-indigo-600 ml-2">({cat.price}€)</span></div>)}
+                        {getFilteredCatalog(item.desc).map(cat => <div key={cat.id} onMouseDown={() => { const u = [...bItems]; u[index].desc = cat.description; u[index].price = cat.price; setBItems(u); setActiveItemIndex(null); }} className="p-3 hover:bg-indigo-50 cursor-pointer font-medium border-b border-slate-100 transition">{cat.description} <span className="font-black text-indigo-600 ml-2">({cat.price}€)</span></div>)}
                       </div>
                     )}
                     <div className="flex gap-2">
@@ -1150,7 +917,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               <div className="bg-slate-800 text-white p-3 rounded-lg flex items-center justify-between mt-2 shadow-md">
                 <span className="font-bold uppercase tracking-wider text-slate-300">Total IVA Inc.</span><span className="font-black text-lg">{calculatedTotal.toFixed(2)} €</span>
               </div>
-              <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg shadow-md transition cursor-pointer mt-2 text-sm">Guardar y PDF</button>
+              <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg shadow-md transition cursor-pointer mt-2 text-sm">
+                {editingBudgetId ? 'Actualizar Presupuesto' : 'Guardar y PDF'}
+              </button>
             </form>
           </div>
         </div>
@@ -1468,6 +1237,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                       <div><label className="block font-bold text-slate-600 mb-1">Teléfono Empresa</label><input type="tel" value={crmForm.company_phone} onChange={e => setCrmForm({...crmForm, company_phone: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
                       <div><label className="block font-bold text-slate-600 mb-1">Contacto Administración</label><input type="text" placeholder="Ej. Marta" value={crmForm.admin_contact} onChange={e => setCrmForm({...crmForm, admin_contact: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
                       <div><label className="block font-bold text-slate-600 mb-1">Correo Administración</label><input type="email" value={crmForm.admin_email} onChange={e => setCrmForm({...crmForm, admin_email: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-3"><label className="block font-bold text-slate-600 mb-1">Cuenta Bancaria (IBAN)</label><input type="text" placeholder="ESXX XXXX XXXX..." value={crmForm.bank_account} onChange={e => setCrmForm({...crmForm, bank_account: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
                     </div>
                   </div>
                 </form>
