@@ -2,515 +2,1603 @@
 /* eslint-disable */
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { supabase } from '@/lib/supabase';
 
-// ============================================================================
-// 1. MOTOR TETRIS REAL (Controles Clásicos Mejorados)
-// ============================================================================
-const BOARD_WIDTH = 10;
-const BOARD_HEIGHT = 20;
+interface DocumentsViewProps {
+  user: any;
+}
 
-const TETROMINOES = {
-  I: { shape: [[1, 1, 1, 1]], color: 'bg-cyan-400' },
-  O: { shape: [[1, 1], [1, 1]], color: 'bg-yellow-400' },
-  T: { shape: [[0, 1, 0], [1, 1, 1]], color: 'bg-purple-500' },
-  J: { shape: [[1, 0, 0], [1, 1, 1]], color: 'bg-blue-500' },
-  L: { shape: [[0, 0, 1], [1, 1, 1]], color: 'bg-orange-500' },
-  S: { shape: [[0, 1, 1], [1, 1, 0]], color: 'bg-green-500' },
-  Z: { shape: [[1, 1, 0], [0, 1, 1]], color: 'bg-red-500' }
-};
+export default function DocumentsView({ user }: DocumentsViewProps) {
+  const [docTab, setDocTab] = useState<'presupuestos' | 'facturas' | 'ordenes' | 'clientes'>('presupuestos');
+  
+  const [budgets, setBudgets] = useState<any[]>([]);
+  const [workOrders, setWorkOrders] = useState<any[]>([]);
+  const [crmClients, setCrmClients] = useState<any[]>([]);
+  const [catalogItems, setCatalogItems] = useState<any[]>([]);
+  const [allExpenses, setAllExpenses] = useState<any[]>([]);
+  const [allAttachments, setAllAttachments] = useState<any[]>([]);
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-const createEmptyBoard = () => Array.from(Array(BOARD_HEIGHT), () => Array(BOARD_WIDTH).fill(null));
+  const [crmSearchQuery, setCrmSearchQuery] = useState('');
 
-function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => void, onWin: (score: number) => void }) {
-  const [board, setBoard] = useState(createEmptyBoard());
-  const [piece, setPiece] = useState<any>(null);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-  const [score, setScore] = useState(0);
-  const [gameOver, setGameOver] = useState(false);
-  const targetScore = level * 150; 
+  const [showAddBudgetModal, setShowAddBudgetModal] = useState(false);
+  const [showCatalogItemModal, setShowCatalogItemModal] = useState(false);
+  const [showStatsModal, setShowStatsModal] = useState(false);
+  
+  const [activeWorkOrder, setActiveWorkOrder] = useState<any | null>(null);
+  const [woExpenses, setWoExpenses] = useState<any[]>([]);
+  const [woAttachments, setWoAttachments] = useState<any[]>([]);
+  const [newExpenseDesc, setNewExpenseDesc] = useState('');
+  const [newExpenseAmount, setNewExpenseAmount] = useState<number | ''>('');
+  const [woTab, setWoTab] = useState<'info' | 'gastos' | 'archivos'>('info');
 
-  const spawnPiece = useCallback(() => {
-    const tetrominos = 'IJLOSTZ';
-    const randTetromino = TETROMINOES[tetrominos[Math.floor(Math.random() * tetrominos.length)] as keyof typeof TETROMINOES];
-    setPiece(randTetromino);
-    setPos({ x: Math.floor(BOARD_WIDTH / 2) - Math.floor(randTetromino.shape[0].length / 2), y: 0 });
-  }, []);
+  // PRESUPUESTOS Y DATOS DEL CLIENTE
+  const [bCode, setBCode] = useState('');
+  const [bWorkOrderRef, setBWorkOrderRef] = useState('');
+  const [bValidUntil, setBValidUntil] = useState('');
+  
+  // Control inteligente del cliente
+  const [bClientId, setBClientId] = useState<string | null>(null);
+  const [bClient, setBClient] = useState('');
+  const [bCif, setBCif] = useState('');
+  const [bAddress, setBAddress] = useState('');
+  const [bEmail, setBEmail] = useState('');
+  const [bPhone, setBPhone] = useState('');
+  const [bContact, setBContact] = useState(''); // NUEVO CAMPO: Persona de contacto
+  const [bItems, setBItems] = useState<Array<{ desc: string; qty: number; price: number }>>([{ desc: '', qty: 1, price: 0 }]);
 
-  useEffect(() => { if (!piece && !gameOver) spawnPiece(); }, [piece, gameOver, spawnPiece]);
+  const [isScanning, setIsScanning] = useState(false);
 
-  const checkCollision = (shape: any[][], x: number, y: number, currentBoard: any[][]) => {
-    for (let r = 0; r < shape.length; r++) {
-      for (let c = 0; c < shape[r].length; c++) {
-        if (shape[r][c] !== 0) {
-          const newY = y + r;
-          const newX = x + c;
-          if (newY >= BOARD_HEIGHT || newX < 0 || newX >= BOARD_WIDTH || (newY >= 0 && currentBoard[newY][newX] !== null)) {
-            return true;
+  const [filteredSuggestions, setFilteredSuggestions] = useState<any[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
+
+  const [newCatDesc, setNewCatDesc] = useState('');
+  const [newCatPrice, setNewCatPrice] = useState<number>(0);
+
+  const [showCrmModal, setShowCrmModal] = useState(false);
+  const [crmTab, setCrmTab] = useState<'datos' | 'historial'>('datos');
+  const [crmForm, setCrmForm] = useState({
+    id: null, name: '', phone: '', email: '', cif: '', address: '', street: '', street_number: '', postal_code: '', population: '', city: '', country: 'España', company: '', company_cif: '', company_address: '', company_phone: '', admin_contact: '', admin_email: ''
+  });
+
+  const [sharingDocument, setSharingDocument] = useState<any | null>(null);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [invoiceModal, setInvoiceModal] = useState({ show: false, budget: null as any, percentage: 100 });
+  const [restInvoiceModal, setRestInvoiceModal] = useState({ show: false, budget: null as any, items: [] as any[], alreadyInvoicedSubtotal: 0, activeItemIndex: null as number | null });
+  const [paymentModal, setPaymentModal] = useState({ show: false, invoice: null as any, method: 'Transferencia Bancaria' });
+
+  const [storageUsedMB, setStorageUsedMB] = useState<number>(0);
+
+  const docPressTimer = useRef<any>(null);
+  const isDocLongPress = useRef(false);
+
+  const isManager = user.role === 'admin' || user.role === 'supplier_owner' || user.role === 'gerente';
+
+  const generateNextBudgetCode = (budgetList = budgets) => {
+    const currentYear = new Date().getFullYear();
+    const prefix = `PRE-${currentYear}`;
+    const yearBudgets = budgetList.filter(b => b.code && b.code.startsWith(prefix));
+    let nextNum = 1;
+    if (yearBudgets.length > 0) {
+      const numbers = yearBudgets.map(b => {
+        const numPart = b.code.replace(prefix, '');
+        const parsed = parseInt(numPart, 10);
+        return isNaN(parsed) ? 0 : parsed;
+      });
+      nextNum = Math.max(...numbers) + 1;
+    }
+    return `${prefix}${String(nextNum).padStart(2, '0')}`;
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      setUserProfile(profile);
+
+      let bQ = supabase.from('budgets').select('*').order('created_at', { ascending: false });
+      let cQ = supabase.from('clients').select('*').order('name', { ascending: true });
+      let iQ = supabase.from('items_catalog').select('*').order('description', { ascending: true });
+      let oQ = supabase.from('work_orders').select('*').order('created_at', { ascending: false });
+      let expQ = supabase.from('work_expenses').select('*');
+      let attQ = supabase.from('attachments').select('*');
+
+      if (!isManager) {
+        bQ = bQ.eq('user_id', user.id);
+        cQ = cQ.eq('user_id', user.id);
+        iQ = iQ.eq('user_id', user.id);
+        oQ = oQ.eq('user_id', user.id);
+      }
+
+      const [resBudgets, resClients, resCatalog, resOrders, resExp, resAtt] = await Promise.all([bQ, cQ, iQ, oQ, expQ, attQ]);
+      if (resClients.data) setCrmClients(resClients.data);
+      if (resBudgets.data) {
+        setBudgets(resBudgets.data);
+        setBCode(generateNextBudgetCode(resBudgets.data));
+      }
+      if (resCatalog.data) setCatalogItems(resCatalog.data);
+      if (resOrders.data) setWorkOrders(resOrders.data);
+      if (resExp.data) setAllExpenses(resExp.data);
+      if (resAtt.data) setAllAttachments(resAtt.data);
+
+      await calculateStorageSize();
+    } catch (err) {
+      console.error('Error cargando datos:', err);
+    } finally { 
+      setIsLoading(false); 
+    }
+  };
+
+  const calculateStorageSize = async () => {
+    try {
+      let totalBytes = 0;
+      const getFolderBytes = async (prefix = '') => {
+        const { data: list, error } = await supabase.storage.from('chat_attachments').list(prefix, { limit: 100 });
+        if (error || !list) return;
+
+        for (const item of list) {
+          if (!item.id) {
+            const subPrefix = prefix ? `${prefix}/${item.name}` : item.name;
+            await getFolderBytes(subPrefix);
+          } else {
+            totalBytes += item.metadata?.size || 0;
+          }
+        }
+      };
+      await getFolderBytes('');
+      setStorageUsedMB(Number((totalBytes / (1024 * 1024)).toFixed(2)));
+    } catch (e) {
+      console.warn('Error calculando storage:', e);
+    }
+  };
+
+  const resetBudgetForm = () => {
+    setBCode(generateNextBudgetCode());
+    setBClientId(null);
+    setBClient('');
+    setBCif('');
+    setBAddress('');
+    setBEmail('');
+    setBPhone('');
+    setBContact(''); // Resetear campo de contacto
+    setBWorkOrderRef('');
+    setBValidUntil('');
+    setBItems([{ desc: '', qty: 1, price: 0 }]);
+  };
+
+  const handleOpenAddBudget = () => {
+    resetBudgetForm();
+    setShowAddBudgetModal(true);
+  };
+
+  const handleScanWorkOrder = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsScanning(true);
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        
+        img.onerror = () => {
+          alert('❌ El navegador no puede procesar esta foto. Si es un archivo HEIC, usa la cámara en su lugar.');
+          setIsScanning(false);
+          e.target.value = '';
+        };
+
+        img.onload = async () => {
+          try {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 1000;
+            const scaleSize = MAX_WIDTH / img.width;
+            canvas.width = MAX_WIDTH;
+            canvas.height = img.height * scaleSize;
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+            const response = await fetch('/api/scan-work-order', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: compressedBase64 }),
+              signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              const errorData = await response.json();
+              throw new Error(errorData.error || `Error ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // Mapeo inteligente con el CRM después del escaneo
+            let foundClient = null;
+            if (data.client_name) {
+              foundClient = crmClients.find(c => 
+                c.name?.toLowerCase().includes(data.client_name.toLowerCase()) || 
+                (c.company && c.company.toLowerCase().includes(data.client_name.toLowerCase())) ||
+                (data.client_phone && c.phone && c.phone.includes(data.client_phone))
+              );
+            }
+
+            if (foundClient) {
+              setBClientId(foundClient.id);
+              setBClient(foundClient.company ? `${foundClient.name} (${foundClient.company})` : foundClient.name);
+              setBCif(foundClient.cif || foundClient.company_cif || data.client_cif || '');
+              setBAddress(foundClient.address || data.client_address || '');
+              setBPhone(foundClient.phone || foundClient.company_phone || data.client_phone || '');
+              setBEmail(foundClient.email || foundClient.admin_email || '');
+              setBContact(foundClient.admin_contact || data.client_contact || '');
+            } else {
+              setBClientId(null);
+              if (data.client_name) setBClient(data.client_name);
+              if (data.client_address) setBAddress(data.client_address);
+              if (data.client_phone) setBPhone(data.client_phone);
+              if (data.client_contact) setBContact(data.client_contact);
+            }
+
+            if (data.work_order_ref) setBWorkOrderRef(data.work_order_ref);
+            
+            if (data.items && data.items.length > 0) {
+              const parsedItems = data.items.map((i: any) => ({
+                desc: i.description || '',
+                qty: Number(i.quantity) || 1,
+                price: Number(i.price) || 0
+              }));
+              setBItems(parsedItems);
+            }
+
+            alert('✅ ¡Datos extraídos por IA! Por favor revisa y ajusta la información.');
+          } catch (err: any) {
+            if (err.name === 'AbortError') {
+              alert('❌ Tiempo agotado. La IA tardó demasiado en responder.');
+            } else {
+              alert('❌ La IA detectó un error: ' + err.message);
+            }
+          } finally {
+            setIsScanning(false);
+            e.target.value = '';
+          }
+        };
+      };
+    } catch (err: any) {
+      alert('❌ Error al cargar la foto: ' + err.message);
+      setIsScanning(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleClientInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value; 
+    setBClient(val);
+    
+    // Si el usuario teclea manualmente, desconectamos el ID para que cuente como cliente nuevo
+    setBClientId(null);
+    
+    if (val.trim().length > 0) {
+      setFilteredSuggestions(crmClients.filter(c => 
+        (c.name && c.name.toLowerCase().includes(val.toLowerCase())) || 
+        (c.company && c.company.toLowerCase().includes(val.toLowerCase())) ||
+        (c.phone && c.phone.includes(val))
+      ));
+      setShowSuggestions(true);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
+  const handleSelectSuggestion = (cli: any) => {
+    setBClientId(cli.id);
+    setBClient(cli.company ? `${cli.name} (${cli.company})` : cli.name); 
+    setBCif(cli.cif || cli.company_cif || ''); 
+    setBAddress(cli.address || ''); 
+    setBEmail(cli.email || cli.admin_email || ''); 
+    setBPhone(cli.phone || cli.company_phone || '');
+    setBContact(cli.admin_contact || ''); // Cargar el contacto del CRM
+    setShowSuggestions(false);
+  };
+
+  const getFilteredCatalog = (desc: string) => desc.trim() ? catalogItems.filter(c => c.description.toLowerCase().includes(desc.toLowerCase())) : [];
+  const handleAddItemRow = () => setBItems(prev => [...prev, { desc: '', qty: 1, price: 0 }]);
+  const calculatedSubtotal = bItems.reduce((acc, item) => acc + (Number(item.qty) || 0) * (Number(item.price) || 0), 0);
+  const calculatedTotal = calculatedSubtotal * 1.21;
+
+  // =========================================================================
+  // GUARDAR PRESUPUESTO + GESTIÓN INTELIGENTE DEL CRM
+  // =========================================================================
+  const handleSaveBudget = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      let finalClientId = bClientId;
+
+      // 1. Lógica de guardado en el CRM
+      if (!bClientId && bClient.trim() !== '') {
+        // ES UN CLIENTE NUEVO -> Lo creamos automático en el CRM
+        const newClientPayload = {
+          name: bClient, cif: bCif, address: bAddress, email: bEmail, phone: bPhone, admin_contact: bContact, user_id: user.id
+        };
+        const { data: newCli } = await supabase.from('clients').insert([newClientPayload]).select();
+        if (newCli) {
+          finalClientId = newCli[0].id;
+          setCrmClients(prev => [...prev, newCli[0]]);
+        }
+      } else if (bClientId) {
+        // ES UN CLIENTE EXISTENTE -> Comparamos para ver si han modificado algo
+        const original = crmClients.find(c => c.id === bClientId);
+        if (original) {
+          const originalName = original.company ? `${original.name} (${original.company})` : original.name;
+          const originalCif = original.cif || original.company_cif || '';
+          const originalAddress = original.address || '';
+          const originalEmail = original.email || original.admin_email || '';
+          const originalPhone = original.phone || original.company_phone || '';
+          const originalContact = original.admin_contact || '';
+
+          // Comprobamos si hay alguna diferencia entre lo que había y lo que han tecleado en el formulario
+          if (bClient !== originalName || bCif !== originalCif || bAddress !== originalAddress || bEmail !== originalEmail || bPhone !== originalPhone || bContact !== originalContact) {
+            const wantToUpdate = window.confirm('Has modificado los datos de este cliente en el formulario.\n\n¿Quieres guardar estos cambios permanentemente en su ficha del CRM?');
+            
+            if (wantToUpdate) {
+              const updatePayload = {
+                name: bClient.includes('(') ? bClient.split(' (')[0].trim() : bClient, // Limpia el nombre si tenía empresa
+                cif: bCif,
+                address: bAddress,
+                email: bEmail,
+                phone: bPhone,
+                admin_contact: bContact // Guardamos el nuevo contacto en su ficha
+              };
+              const { data: updatedCli } = await supabase.from('clients').update(updatePayload).eq('id', bClientId).select();
+              if (updatedCli) {
+                setCrmClients(prev => prev.map(c => c.id === bClientId ? updatedCli[0] : c));
+              }
+            }
           }
         }
       }
-    }
-    return false;
+
+      // 2. Guardado del Presupuesto
+      const { data, error } = await supabase.from('budgets').insert([{
+        code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
+        subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, pdf_name: `${bCode}.pdf`, items: bItems, 
+        user_id: user.id, status: 'pendiente', type: 'presupuesto'
+      }]).select();
+
+      if (error) throw error;
+      if (data) {
+        const updatedBudgets = [data[0], ...budgets];
+        setBudgets(updatedBudgets); 
+        setShowAddBudgetModal(false);
+        resetBudgetForm();
+        setBCode(generateNextBudgetCode(updatedBudgets)); // Pre-generamos el siguiente
+      }
+    } catch (err: any) { alert('Error: ' + err.message); }
   };
 
-  const lockPiece = useCallback(() => {
-    if (!piece) return;
-    const newBoard = board.map(row => [...row]);
-    let gameIsOver = false;
+  const handleAcceptBudget = async (budget: any) => {
+    if (!confirm(`¿Aceptar presupuesto de ${budget.client}?`)) return;
+    try {
+      await supabase.from('budgets').update({ status: 'aceptado' }).eq('id', budget.id);
+      const { data: woData } = await supabase.from('work_orders').insert([{ 
+        budget_id: budget.id, 
+        client_name: budget.client, 
+        work_order_ref: budget.work_order_ref || `Obra-${budget.code}`,
+        status: 'en_curso', 
+        user_id: user.id 
+      }]).select();
+      
+      setBudgets(prev => prev.map(b => b.id === budget.id ? { ...b, status: 'aceptado' } : b));
+      if (woData) setWorkOrders(prev => [woData[0], ...prev]);
+      alert('¡Presupuesto Aceptado! Orden generada con referencia: ' + (budget.work_order_ref || budget.code));
+      setDocTab('ordenes');
+    } catch (err: any) { alert('Error: ' + err.message); }
+  };
 
-    for (let r = 0; r < piece.shape.length; r++) {
-      for (let c = 0; c < piece.shape[r].length; c++) {
-        if (piece.shape[r][c] !== 0) {
-          if (pos.y + r < 0) { gameIsOver = true; } 
-          else { newBoard[pos.y + r][pos.x + c] = piece.color; }
+  const handleRejectBudget = async (id: string) => {
+    try {
+      await supabase.from('budgets').update({ status: 'rechazado' }).eq('id', id);
+      setBudgets(prev => prev.map(b => b.id === id ? { ...b, status: 'rechazado' } : b));
+    } catch (err: any) { alert('Error: ' + err.message); }
+  };
+
+  const generateNextInvoiceCode = () => {
+    const invoices = budgets.filter(b => b.type === 'factura' || (b.code && b.code.startsWith('FAC-')));
+    let nextNum = userProfile?.invoice_start_num || 1;
+    if (invoices.length > 0) {
+      const maxExisting = Math.max(...invoices.map(i => {
+        const m = i.code.match(/FAC-\d{4}-(\d+)/);
+        return m ? parseInt(m[1], 10) : 0;
+      }));
+      if (maxExisting >= nextNum) nextNum = maxExisting + 1;
+    }
+    return `FAC-${new Date().getFullYear()}-${String(nextNum).padStart(4, '0')}`;
+  };
+
+  const handleOpenInvoiceModal = (budget: any) => {
+    setInvoiceModal({ show: true, budget, percentage: 100 });
+  };
+
+  const handleConfirmInvoice = async () => {
+    const { budget, percentage } = invoiceModal;
+    try {
+      const newCode = generateNextInvoiceCode();
+      const pct = percentage / 100;
+      const newSubtotal = Number(budget.subtotal) * pct;
+      const newVat = Number(budget.vat) * pct;
+      const newTotal = Number(budget.total) * pct;
+      
+      if (percentage === 100) {
+        const { error } = await supabase.from('budgets').update({ code: newCode, type: 'factura', status: 'pendiente_cobro' }).eq('id', budget.id);
+        if (error) throw error;
+        setBudgets(prev => prev.map(b => b.id === budget.id ? { ...b, code: newCode, type: 'factura', status: 'pendiente_cobro' } : b));
+      } else {
+        const newItems = [{ desc: `Facturación parcial (Anticipo ${percentage}%) de ${budget.code}`, qty: 1, price: newSubtotal }];
+        const { data: newFactura, error } = await supabase.from('budgets').insert([{
+          code: newCode, client: budget.client, client_cif: budget.client_cif, address: budget.address,
+          work_order_ref: budget.work_order_ref || '',
+          subtotal: newSubtotal, vat: newVat, total: newTotal, pdf_name: `${newCode}.pdf`,
+          items: newItems, user_id: user.id, status: 'pendiente_cobro', type: 'factura', parent_id: budget.id
+        }]).select();
+
+        if (error) throw error;
+        await supabase.from('budgets').update({ status: 'parcialmente_facturado' }).eq('id', budget.id);
+        setBudgets(prev => {
+          const updated = prev.map(b => b.id === budget.id ? { ...b, status: 'parcialmente_facturado' } : b);
+          return [newFactura[0], ...updated];
+        });
+      }
+
+      alert(`Factura generada con éxito (${newCode}).`);
+      setInvoiceModal({ show: false, budget: null, percentage: 100 });
+      setDocTab('facturas');
+    } catch (err: any) { alert('Error al facturar: ' + err.message); }
+  };
+
+  const handleOpenRestInvoiceModal = (budget: any) => {
+    const relatedInvoices = budgets.filter(b => b.type === 'factura' && b.parent_id === budget.id);
+    const alreadyInvoicedSubtotal = relatedInvoices.reduce((acc, inv) => acc + Number(inv.subtotal), 0);
+    setRestInvoiceModal({ show: true, budget, items: [...(budget.items || [])], alreadyInvoicedSubtotal, activeItemIndex: null });
+  };
+
+  const handleConfirmRestInvoice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { budget, items, alreadyInvoicedSubtotal } = restInvoiceModal;
+    try {
+      const newCode = generateNextInvoiceCode();
+      const currentSubtotal = items.reduce((acc, item) => acc + (Number(item.qty) || 0) * (Number(item.price) || 0), 0);
+      const finalSubtotal = currentSubtotal - alreadyInvoicedSubtotal;
+      const finalVat = finalSubtotal * 0.21;
+      const finalTotal = finalSubtotal + finalVat;
+
+      const finalItems = [...items, { desc: `Descuento Anticipo ya facturado (${budget.code})`, qty: 1, price: -alreadyInvoicedSubtotal }];
+
+      const { data: newFactura, error } = await supabase.from('budgets').insert([{
+        code: newCode, client: budget.client, client_cif: budget.client_cif, address: budget.address,
+        work_order_ref: budget.work_order_ref || '',
+        subtotal: finalSubtotal, vat: finalVat, total: finalTotal, pdf_name: `${newCode}.pdf`,
+        items: finalItems, user_id: user.id, status: 'pendiente_cobro', type: 'factura', parent_id: budget.id
+      }]).select();
+
+      if (error) throw error;
+
+      await supabase.from('budgets').update({ status: 'facturado', items: items, subtotal: currentSubtotal, vat: currentSubtotal*0.21, total: currentSubtotal*1.21 }).eq('id', budget.id);
+
+      setBudgets(prev => {
+        const updated = prev.map(b => b.id === budget.id ? { ...b, status: 'facturado', items: items, subtotal: currentSubtotal, vat: currentSubtotal*0.21, total: currentSubtotal*1.21 } : b);
+        return [newFactura[0], ...updated];
+      });
+
+      alert(`Factura final de obra generada con éxito (${newCode}).`);
+      setRestInvoiceModal({ show: false, budget: null, items: [], alreadyInvoicedSubtotal: 0, activeItemIndex: null });
+      setDocTab('facturas');
+    } catch (err: any) { alert('Error al facturar el resto: ' + err.message); }
+  };
+
+  const checkSequentialIntegrity = (code: string) => {
+    const invoices = budgets.filter(doc => doc.type === 'factura' || (doc.code && doc.code.startsWith('FAC-')));
+    const maxNum = Math.max(...invoices.map(i => { const m = i.code.match(/FAC-\d{4}-(\d+)/); return m ? parseInt(m[1], 10) : 0; }));
+    const currentMatch = code.match(/FAC-\d{4}-(\d+)/);
+    const currentNum = currentMatch ? parseInt(currentMatch[1], 10) : 0;
+    return { isLast: currentNum === maxNum, maxNum };
+  };
+
+  const handleRevertToBudget = async (b: any) => {
+    const integrity = checkSequentialIntegrity(b.code);
+    if (!integrity.isLast) {
+      alert(`⚠️ CORRELATIVIDAD: Solo puedes devolver a presupuesto la ÚLTIMA factura generada (nº ${integrity.maxNum}).`);
+      return;
+    }
+
+    if (!confirm(`¿Devolver la factura ${b.code} a estado de Presupuesto?`)) return;
+    try {
+      if (b.parent_id) {
+        await supabase.from('budgets').delete().eq('id', b.id);
+        await supabase.from('budgets').update({ status: 'pendiente' }).eq('id', b.parent_id);
+        setBudgets(prev => prev.filter(doc => doc.id !== b.id).map(doc => doc.id === b.parent_id ? { ...doc, status: 'pendiente' } : doc));
+      } else {
+        const revertedCode = b.code.replace('FAC-', 'PRE-');
+        await supabase.from('budgets').update({ type: 'presupuesto', code: revertedCode, status: 'pendiente' }).eq('id', b.id);
+        setBudgets(prev => prev.map(doc => doc.id === b.id ? { ...doc, type: 'presupuesto', code: revertedCode, status: 'pendiente' } : doc));
+      }
+      alert('Documento devuelto a Presupuesto limpiamente.');
+      setDocTab('presupuestos');
+    } catch (err: any) { alert('Error al revertir: ' + err.message); }
+  };
+
+  const handleDocPressStart = (b: any) => {
+    isDocLongPress.current = false;
+    docPressTimer.current = setTimeout(() => {
+      isDocLongPress.current = true;
+      handleDeleteDocument(b);
+    }, 5000);
+  };
+
+  const handleDocPressEnd = () => {
+    if (docPressTimer.current) clearTimeout(docPressTimer.current);
+  };
+
+  const handleDeleteDocument = async (b: any) => {
+    if (b.type === 'factura') {
+      const integrity = checkSequentialIntegrity(b.code);
+      if (!integrity.isLast) {
+        alert(`⚠️ CORRELATIVIDAD: Solo puedes anular la ÚLTIMA factura generada (nº ${integrity.maxNum}).`);
+        return;
+      }
+    } else {
+      const hasInvoices = budgets.some(doc => doc.type === 'factura' && (doc.parent_id === b.id || doc.id === b.id));
+      if (hasInvoices) {
+        alert('⚠️ NO SE PUEDE ELIMINAR: Este presupuesto ya tiene facturas emitidas. Para borrarlo, primero debes anular o revertir sus facturas.');
+        return;
+      }
+
+      const linkedOrder = workOrders.find(wo => wo.budget_id === b.id);
+      if (linkedOrder) {
+        const hasExpenses = allExpenses.some(exp => exp.work_order_id === linkedOrder.id);
+        const hasAttachments = allAttachments.some(att => att.work_order_id === linkedOrder.id);
+
+        if (hasExpenses || hasAttachments) {
+          alert('⚠️ NO SE PUEDE ELIMINAR: La orden de trabajo vinculada contiene gastos o archivos guardados. Debes eliminar primero todos los apuntes de la obra para poder borrar el presupuesto.');
+          return;
         }
       }
     }
 
-    if (gameIsOver) {
-      setGameOver(true);
-      return;
-    }
-
-    let linesCleared = 0;
-    const filteredBoard = newBoard.filter(row => row.some(cell => cell === null));
-    linesCleared = BOARD_HEIGHT - filteredBoard.length;
-    const newEmptyRows = Array.from(Array(linesCleared), () => Array(BOARD_WIDTH).fill(null));
-    const finalBoard = [...newEmptyRows, ...filteredBoard];
-
-    setBoard(finalBoard);
+    if (!confirm(`¿Estás seguro de ELIMINAR definitivamente el documento ${b.code}?`)) return;
     
-    const newScore = score + 10 + (linesCleared * 100);
-    setScore(newScore);
-    setPiece(null);
-
-    if (newScore >= targetScore) onWin(newScore);
-
-  }, [piece, pos, board, score, targetScore, onWin]);
-
-  const moveDown = useCallback(() => {
-    if (gameOver || !piece) return;
-    if (!checkCollision(piece.shape, pos.x, pos.y + 1, board)) {
-      setPos(prev => ({ ...prev, y: prev.y + 1 }));
-    } else {
-      lockPiece();
-    }
-  }, [piece, pos, board, gameOver, lockPiece]);
-
-  const moveLeft = () => { if (piece && !gameOver && !checkCollision(piece.shape, pos.x - 1, pos.y, board)) setPos(p => ({...p, x: p.x - 1})); };
-  const moveRight = () => { if (piece && !gameOver && !checkCollision(piece.shape, pos.x + 1, pos.y, board)) setPos(p => ({...p, x: p.x + 1})); };
-  const rotatePiece = () => {
-    if (!piece || gameOver) return;
-    const rotatedShape = piece.shape[0].map((_: any, index: number) => piece.shape.map((row: any[]) => row[index]).reverse());
-    if (!checkCollision(rotatedShape, pos.x, pos.y, board)) setPiece({ ...piece, shape: rotatedShape });
-  };
-  const dropPiece = () => {
-    if (!piece || gameOver) return;
-    let newY = pos.y;
-    while (!checkCollision(piece.shape, pos.x, newY + 1, board)) { newY++; }
-    setPos({ ...pos, y: newY });
-  };
-
-  useEffect(() => {
-    const speed = Math.max(100, 800 - (level * 20)); 
-    const timer = setInterval(moveDown, speed);
-    return () => clearInterval(timer);
-  }, [moveDown, level]);
-
-  return (
-    <div className="flex flex-col items-center justify-between w-full h-full bg-slate-900 rounded-2xl p-4 sm:p-6 relative overflow-hidden animate-in fade-in">
-      
-      {/* CABECERA */}
-      <div className="flex justify-between w-full shrink-0">
-        <button onClick={onBack} className="w-10 h-10 bg-slate-800 text-white rounded-full font-black hover:bg-rose-500 transition shrink-0">←</button>
-        <div className="text-center">
-          <div className="text-white font-black text-lg sm:text-xl">TETRIS LVL {level}</div>
-          <div className="text-[10px] sm:text-xs text-slate-400 font-bold uppercase tracking-widest">Meta: {targetScore}</div>
-        </div>
-        <div className="text-amber-400 font-black text-xl sm:text-2xl w-14 text-right">{score}</div>
-      </div>
-
-      {/* TABLERO */}
-      <div className="flex-1 flex items-center justify-center my-4 min-h-[300px]">
-        <div className="bg-slate-950 p-2 rounded-lg border-4 border-slate-700 shadow-2xl relative">
-          <div className="absolute -right-5 sm:-right-6 bottom-0 w-2 bg-slate-800 rounded-full h-full border border-slate-700 overflow-hidden">
-            <div className="bg-amber-400 w-full absolute bottom-0 transition-all duration-300" style={{ height: `${Math.min(100, (score/targetScore)*100)}%` }}></div>
-          </div>
-          
-          {gameOver && (
-            <div className="absolute inset-0 z-10 bg-slate-900/90 flex flex-col items-center justify-center backdrop-blur-sm rounded-md">
-              <span className="text-white font-black text-2xl mb-4">GAME OVER</span>
-              <button onClick={() => { setBoard(createEmptyBoard()); setScore(0); setGameOver(false); setPiece(null); }} className="px-6 py-3 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl font-bold shadow-[0_4px_0_rgb(67,56,202)] active:shadow-none active:translate-y-[4px]">Reintentar</button>
-            </div>
-          )}
-
-          <div className="grid grid-rows-[repeat(20,minmax(0,1fr))] gap-[1px] bg-slate-800" style={{ width: '200px', height: '400px' }}>
-            {board.map((row, y) => row.map((cell, x) => {
-              let color = cell ? cell : 'bg-slate-900';
-              if (piece && y >= pos.y && y < pos.y + piece.shape.length && x >= pos.x && x < pos.x + piece.shape[0].length) {
-                if (piece.shape[y - pos.y][x - pos.x] !== 0) { color = piece.color; }
-              }
-              return <div key={`${y}-${x}`} className={`w-full h-full ${color} rounded-[1px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]`} />;
-            }))}
-          </div>
-        </div>
-      </div>
-
-      {/* MANDO TÁCTIL ESTILO CONSOLA (Mejorado) */}
-      <div className="w-full max-w-[320px] flex flex-col gap-3 shrink-0 pb-2">
-        <button 
-          onClick={rotatePiece} 
-          className="w-full py-4 bg-indigo-500 active:bg-indigo-600 rounded-2xl text-white font-black text-xl shadow-[0_6px_0_rgb(67,56,202)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center gap-2"
-        >
-          <span className="text-2xl">↻</span> GIRAR
-        </button>
-        
-        <div className="flex gap-3 w-full h-20">
-          <button 
-            onClick={moveLeft} 
-            className="flex-1 bg-slate-700 active:bg-slate-800 rounded-2xl text-white font-black text-4xl shadow-[0_6px_0_rgb(51,65,85)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center"
-          >
-            ←
-          </button>
-          <button 
-            onClick={dropPiece} 
-            className="flex-1 bg-rose-500 active:bg-rose-600 rounded-2xl text-white font-black text-3xl shadow-[0_6px_0_rgb(225,29,72)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center"
-          >
-            ⏬
-          </button>
-          <button 
-            onClick={moveRight} 
-            className="flex-1 bg-slate-700 active:bg-slate-800 rounded-2xl text-white font-black text-4xl shadow-[0_6px_0_rgb(51,65,85)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center"
-          >
-            →
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// 2. MOTOR SUDOKU REAL (Con botón de comprobar)
-// ============================================================================
-const BASE_SUDOKU = [
-  4,3,5, 2,6,9, 7,8,1,
-  6,8,2, 5,7,1, 4,9,3,
-  1,9,7, 8,3,4, 5,6,2,
-  8,2,6, 1,9,5, 3,4,7,
-  3,7,4, 6,8,2, 9,1,5,
-  9,5,1, 7,4,3, 6,2,8,
-  5,1,9, 3,2,6, 8,7,4,
-  2,4,8, 9,5,7, 1,3,6,
-  7,6,3, 4,1,8, 2,5,9
-];
-
-function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => void, onWin: (score: number) => void }) {
-  const [board, setBoard] = useState<number[]>([]);
-  const [initialBoard, setInitialBoard] = useState<number[]>([]);
-  const [solvedBoard, setSolvedBoard] = useState<number[]>([]);
-  const [selectedCell, setSelectedCell] = useState<number | null>(null);
-  
-  useEffect(() => {
-    const nums = [1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
-    const newSolved = BASE_SUDOKU.map(n => nums[n - 1]);
-    const cellsToHide = Math.min(60, 20 + Math.floor(level * 0.4));
-    const newInitial = [...newSolved];
-    
-    let hidden = 0;
-    while (hidden < cellsToHide) {
-      const rIdx = Math.floor(Math.random() * 81);
-      if (newInitial[rIdx] !== 0) {
-        newInitial[rIdx] = 0;
-        hidden++;
+    try {
+      if (b.parent_id) {
+         await supabase.from('budgets').update({ status: 'pendiente' }).eq('id', b.parent_id);
       }
-    }
-    
-    setSolvedBoard(newSolved);
-    setInitialBoard([...newInitial]);
-    setBoard([...newInitial]);
-  }, [level]);
-
-  const handleInput = (num: number) => {
-    if (selectedCell === null || initialBoard[selectedCell] !== 0) return;
-    const newBoard = [...board];
-    newBoard[selectedCell] = num;
-    setBoard(newBoard);
-  };
-
-  // NUEVO: Función de comprobar manual
-  const handleCheck = () => {
-    if (board.includes(0)) {
-      alert('⚠️ Aún quedan casillas en blanco por rellenar.');
-      return;
-    }
-    
-    const isCorrect = board.every((cell, idx) => cell === solvedBoard[idx]);
-    if (isCorrect) {
-      onWin(level * 100);
-    } else {
-      alert('❌ Hay algún número incorrecto. ¡Revisa el tablero!');
-    }
-  };
-
-  return (
-    <div className="flex flex-col items-center justify-start w-full h-full bg-slate-50 rounded-2xl p-4 relative animate-in fade-in overflow-y-auto">
-      <div className="flex justify-between items-center w-full mb-4 shrink-0">
-        <button onClick={onBack} className="w-10 h-10 bg-slate-200 text-slate-700 rounded-full font-black hover:bg-slate-300 transition">←</button>
-        <div className="text-center">
-          <div className="text-slate-800 font-black text-xl">SUDOKU</div>
-          <div className="text-xs text-indigo-600 font-bold uppercase tracking-widest">Nivel {level}</div>
-        </div>
-        <button onClick={() => onWin(level * 100)} className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[10px] font-bold border border-emerald-300">Ganar (Dev)</button>
-      </div>
-
-      {/* Tablero Jugable */}
-      <div className="bg-white p-2 rounded-xl shadow-lg border-2 border-slate-800 w-full max-w-[340px] shrink-0">
-        <div className="grid grid-cols-9 bg-slate-800 gap-[1px]">
-          {board.map((cell, i) => {
-            const row = Math.floor(i / 9);
-            const col = i % 9;
-            const isRightBorder = col === 2 || col === 5;
-            const isBottomBorder = row === 2 || row === 5;
-            const isInitial = initialBoard[i] !== 0;
-            const isSelected = selectedCell === i;
-            
-            return (
-              <div 
-                key={i} 
-                onClick={() => !isInitial && setSelectedCell(i)}
-                className={`
-                  aspect-square flex items-center justify-center text-lg sm:text-xl font-bold bg-white cursor-pointer select-none transition-colors
-                  ${isRightBorder ? 'border-r-2 border-r-slate-800' : ''} 
-                  ${isBottomBorder ? 'border-b-2 border-b-slate-800' : ''}
-                  ${isSelected ? 'bg-indigo-200 text-indigo-900 ring-inset ring-2 ring-indigo-500' : ''}
-                  ${isInitial ? 'text-slate-800 bg-slate-50' : 'text-indigo-600'}
-                  ${!isInitial && !isSelected ? 'hover:bg-indigo-50' : ''}
-                `}
-              >
-                {cell !== 0 ? cell : ''}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      if (b.type !== 'factura') {
+         await supabase.from('work_orders').delete().eq('budget_id', b.id);
+      }
       
-      {/* Teclado Numérico */}
-      <div className="grid grid-cols-5 gap-2 mt-4 w-full max-w-[340px] shrink-0">
-        {[1,2,3,4,5,6,7,8,9].map(num => (
-          <button 
-            key={num} 
-            onClick={() => handleInput(num)}
-            className="bg-white border border-slate-200 shadow-[0_3px_0_rgb(203,213,225)] rounded-xl py-3 sm:py-4 text-xl font-black text-slate-700 active:shadow-none active:translate-y-[3px] active:bg-indigo-50 active:text-indigo-700 transition-all"
-          >
-            {num}
-          </button>
-        ))}
-        <button 
-          onClick={() => handleInput(0)}
-          className="bg-slate-200 border border-slate-300 shadow-[0_3px_0_rgb(148,163,184)] rounded-xl py-3 sm:py-4 text-sm font-bold text-slate-700 active:shadow-none active:translate-y-[3px] active:bg-slate-300 transition-all flex items-center justify-center"
-        >
-          Borrar
-        </button>
-      </div>
+      await supabase.from('budgets').delete().eq('id', b.id);
+      
+      setBudgets(prev => prev.filter(d => d.id !== b.id));
+      setWorkOrders(prev => prev.filter(wo => wo.budget_id !== b.id));
+      
+      calculateStorageSize();
+      alert('Documento eliminado correctamente.');
+    } catch (err: any) { 
+      alert('Error al borrar: ' + err.message); 
+    }
+  };
 
-      {/* NUEVO: Botón de Comprobar y Ganar */}
-      <div className="w-full max-w-[340px] mt-6 pb-6 shrink-0">
-        <button 
-          onClick={handleCheck}
-          className="w-full py-4 bg-emerald-500 active:bg-emerald-600 text-white rounded-2xl font-black text-xl shadow-[0_6px_0_rgb(5,150,105)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center gap-2"
-        >
-          ✓ COMPROBAR SUDOKU
-        </button>
-      </div>
+  const handleOpenPaymentModal = (invoice: any) => {
+    setPaymentModal({ show: true, invoice, method: 'Transferencia Bancaria' });
+  };
 
-    </div>
-  );
-}
+  const handleConfirmPayment = async () => {
+    const { invoice, method } = paymentModal;
+    try {
+      await supabase.from('budgets').update({ status: 'cobrada', payment_method: method }).eq('id', invoice.id);
+      setBudgets(prev => prev.map(b => b.id === invoice.id ? { ...b, status: 'cobrada', payment_method: method } : b));
+      setPaymentModal({ show: false, invoice: null, method: 'Transferencia Bancaria' });
+    } catch (err: any) { alert('Error al cobrar: ' + err.message); }
+  };
 
-// ============================================================================
-// COMPONENTE PRINCIPAL (HUB DE JUEGOS Y GESTOR DE PROGRESO)
-// ============================================================================
-export default function GamesView() {
-  const [activeGame, setActiveGame] = useState<string | null>(null);
-  const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
-  const [coins, setCoins] = useState<number>(0);
-  
-  const [progress, setProgress] = useState({
-    sudoku: 1,
-    sopa: 1,
-    tetris: 1,
-    candy: 1
+  const openWorkOrderPanel = async (order: any) => {
+    setActiveWorkOrder(order);
+    setWoTab('info');
+    try {
+      const [resExp, resAtt] = await Promise.all([
+        supabase.from('work_expenses').select('*').eq('work_order_id', order.id),
+        supabase.from('attachments').select('*').eq('work_order_id', order.id)
+      ]);
+      setWoExpenses(resExp?.data || []);
+      setWoAttachments(resAtt?.data || []);
+    } catch (err) {
+      console.error('Error cargando obra:', err);
+      setWoExpenses([]);
+      setWoAttachments([]);
+    }
+  };
+
+  const handleFinishWorkOrder = async (id: string) => {
+    if (!confirm('¿Finalizar orden? Ya no aparecerá en la lista activa.')) return;
+    try {
+      await supabase.from('work_orders').update({ status: 'finalizada' }).eq('id', id);
+      setWorkOrders(prev => prev.map(wo => wo.id === id ? { ...wo, status: 'finalizada' } : wo));
+      setActiveWorkOrder(null);
+    } catch (err: any) { alert('Error: ' + err.message); }
+  };
+
+  const handleAddExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeWorkOrder) return;
+    try {
+      const { data, error } = await supabase.from('work_expenses').insert([{ 
+        work_order_id: activeWorkOrder.id, 
+        description: newExpenseDesc, 
+        amount: Number(newExpenseAmount) 
+      }]).select();
+      
+      if (error) throw error;
+      if (data) {
+        setWoExpenses(prev => [...prev, data[0]]);
+        setAllExpenses(prev => [...prev, data[0]]);
+      }
+      setNewExpenseDesc(''); 
+      setNewExpenseAmount('');
+    } catch (err: any) { alert('Error guardando gasto: ' + err.message); }
+  };
+
+  const handleUploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeWorkOrder) return;
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const cleanClientName = (activeWorkOrder.client_name || 'Sin_Cliente').replace(/[^a-zA-Z0-9]/g, '_');
+      
+      const filePath = `clientes_crm/${cleanClientName}/proyecto_${activeWorkOrder.budget_id}/archivos_obra/${fileName}`;
+      
+      const { error: uploadError } = await supabase.storage.from('chat_attachments').upload(filePath, file);
+      if (uploadError) throw uploadError;
+      const { data: publicData } = supabase.storage.from('chat_attachments').getPublicUrl(filePath);
+      const { data: attData } = await supabase.from('attachments').insert([{ work_order_id: activeWorkOrder.id, file_name: file.name, file_url: publicData.publicUrl, type: 'archivo' }]).select();
+      if (attData) {
+        setWoAttachments(prev => [...prev, attData[0]]);
+        setAllAttachments(prev => [...prev, attData[0]]);
+      }
+      calculateStorageSize();
+    } catch (err: any) { alert('Error al subir: ' + err.message); }
+  };
+
+  const handleDeleteAttachment = async (id: string) => {
+    if (!confirm('¿Borrar este archivo para liberar espacio en disco?')) return;
+    try {
+      await supabase.from('attachments').delete().eq('id', id);
+      setWoAttachments(prev => prev.filter(a => a.id !== id));
+      setAllAttachments(prev => prev.filter(a => a.id !== id));
+      calculateStorageSize();
+    } catch (err) {}
+  };
+
+  const openNewCrmModal = () => {
+    setCrmForm({ id: null, name: '', phone: '', email: '', cif: '', address: '', street: '', street_number: '', postal_code: '', population: '', city: '', country: 'España', company: '', company_cif: '', company_address: '', company_phone: '', admin_contact: '', admin_email: '' });
+    setCrmTab('datos'); setShowCrmModal(true);
+  };
+
+  const openEditCrmModal = (client: any) => { 
+    setCrmForm({
+      id: client.id, name: client.name || '', phone: client.phone || '', email: client.email || '', cif: client.cif || '', address: client.address || '',
+      street: client.street || '', street_number: client.street_number || '', postal_code: client.postal_code || '', population: client.population || '', city: client.city || '', country: client.country || 'España',
+      company: client.company || '', company_cif: client.company_cif || '', company_address: client.company_address || '', company_phone: client.company_phone || '', admin_contact: client.admin_contact || '', admin_email: client.admin_email || ''
+    });
+    setCrmTab('datos'); setShowCrmModal(true); 
+  };
+
+  const handleSaveCrmClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const gpsAddressParts = [crmForm.street, crmForm.street_number, crmForm.postal_code, crmForm.population, crmForm.city, crmForm.country].filter(Boolean);
+    const finalGpsAddress = gpsAddressParts.join(', ') || crmForm.address;
+    const payload = { ...crmForm, address: finalGpsAddress, user_id: user.id };
+    delete payload.id;
+    try {
+      if (crmForm.id) {
+        const { data } = await supabase.from('clients').update(payload).eq('id', crmForm.id).select();
+        if (data) setCrmClients(prev => prev.map(c => c.id === crmForm.id ? data[0] : c));
+      } else {
+        const { data } = await supabase.from('clients').insert([payload]).select();
+        if (data) setCrmClients(prev => [...prev, data[0]]);
+      }
+      setShowCrmModal(false);
+    } catch (err: any) { alert('Error guardando cliente: ' + err.message); }
+  };
+
+  const handleSaveCatalogItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const { data } = await supabase.from('items_catalog').insert([{ description: newCatDesc, price: newCatPrice, user_id: user.id }]).select();
+      if (data) { setCatalogItems(prev => [...prev, data[0]]); setShowCatalogItemModal(false); setNewCatDesc(''); setNewCatPrice(0); }
+    } catch (err: any) {}
+  };
+
+  const handleGeneratePdfAction = async (docData: any, method: 'whatsapp' | 'email' | 'download') => {
+    setIsGeneratingPdf(true);
+    try {
+      const doc = new jsPDF();
+      const isFactura = docData.type === 'factura';
+
+      doc.setFontSize(22);
+      doc.setTextColor(79, 70, 229); 
+      doc.text(isFactura ? 'FACTURA' : 'PRESUPUESTO', 14, 20);
+
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Código: ${docData.code}`, 14, 28);
+      if (docData.work_order_ref) doc.text(`Ref. Obra: ${docData.work_order_ref}`, 14, 34);
+      doc.text(`Fecha: ${new Date(docData.created_at).toLocaleDateString()}`, 14, docData.work_order_ref ? 40 : 34);
+
+      if (isFactura && docData.status === 'cobrada') {
+        doc.setTextColor(16, 185, 129);
+        doc.text(`ESTADO: COBRADA (${docData.payment_method})`, 14, 46);
+      } else if (isFactura) {
+        doc.setTextColor(245, 158, 11);
+        doc.text(`ESTADO: PENDIENTE DE PAGO`, 14, 46);
+      }
+
+      doc.setFontSize(12);
+      doc.setTextColor(30, 41, 59);
+      doc.text('Datos del Cliente:', 120, 20);
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(docData.client || 'Cliente', 120, 28);
+      if(docData.client_cif) doc.text(`CIF/NIF: ${docData.client_cif}`, 120, 34);
+      if(docData.address) {
+        const addressLines = doc.splitTextToSize(docData.address, 70);
+        doc.text(addressLines, 120, 40);
+      }
+
+      const itemsList = docData.items || [];
+      const tableData = itemsList.map((item: any) => [
+        item.desc, item.qty, `${Number(item.price).toFixed(2)} €`, `${(Number(item.qty) * Number(item.price)).toFixed(2)} €`
+      ]);
+
+      autoTable(doc, {
+        startY: 55,
+        head: [['Descripción', 'Cantidad', 'Precio Unit.', 'Total']],
+        body: tableData,
+        theme: 'striped',
+        headStyles: { fillColor: [79, 70, 229] }
+      });
+
+      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      doc.setFontSize(10);
+      doc.text(`Subtotal: ${Number(docData.subtotal).toFixed(2)} €`, 130, finalY);
+      doc.text(`IVA (21%): ${Number(docData.vat).toFixed(2)} €`, 130, finalY + 6);
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`TOTAL: ${Number(docData.total).toFixed(2)} €`, 130, finalY + 14);
+
+      if (method === 'download') {
+        doc.save(`${docData.code}.pdf`);
+      } else {
+        const pdfBlob = doc.output('blob');
+        const cleanClientName = (docData.client || 'Sin_Cliente').replace(/[^a-zA-Z0-9]/g, '_');
+        const projectId = docData.parent_id || docData.id;
+        const fileName = `clientes_crm/${cleanClientName}/proyecto_${projectId}/${docData.code}.pdf`;
+        
+        const { error: uploadError } = await supabase.storage.from('chat_attachments').upload(fileName, pdfBlob, { 
+          contentType: 'application/pdf',
+          upsert: true
+        });
+        if (uploadError) throw uploadError;
+
+        const { data: publicUrlData } = supabase.storage.from('chat_attachments').getPublicUrl(fileName);
+        const pdfUrl = publicUrlData.publicUrl;
+
+        const docName = isFactura ? 'la factura' : 'el presupuesto';
+        const message = `Hola! Aquí tienes ${docName} ${docData.code}.\n\nPuedes descargarlo en PDF oficial desde este enlace seguro:\n${pdfUrl}\n\nUn saludo.`;
+
+        const clientData = crmClients.find(c => docData.client.includes(c.name));
+        
+        if (method === 'whatsapp') {
+          let phone = clientData?.phone || clientData?.company_phone || '';
+          phone = phone.replace(/\D/g, ''); 
+          const waUrl = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}` : `https://wa.me/?text=${encodeURIComponent(message)}`;
+          window.open(waUrl, '_blank');
+        } else if (method === 'email') {
+          const email = clientData?.email || clientData?.admin_email || '';
+          window.location.href = `mailto:${email}?subject=${isFactura ? 'Factura' : 'Presupuesto'} ${docData.code}&body=${encodeURIComponent(message)}`;
+        }
+      }
+      calculateStorageSize();
+    } catch (err: any) {
+      alert('Error generando PDF: ' + err.message);
+    } finally {
+      setIsGeneratingPdf(false);
+      setSharingDocument(null);
+    }
+  };
+
+  const filteredBudgets = budgets.filter(b => docTab === 'presupuestos' ? b.type !== 'factura' && b.code.startsWith('PRE') : b.type === 'factura' || b.code.startsWith('FAC'));
+  const filteredCrmList = crmClients.filter(c => {
+    if (!crmSearchQuery.trim()) return true;
+    const q = crmSearchQuery.toLowerCase();
+    return (
+      (c.name && c.name.toLowerCase().includes(q)) || (c.phone && c.phone.includes(q)) || (c.company && c.company.toLowerCase().includes(q)) ||
+      (c.cif && c.cif.toLowerCase().includes(q)) || (c.city && c.city.toLowerCase().includes(q)) || (c.population && c.population.toLowerCase().includes(q))
+    );
   });
 
-  const [winModal, setWinModal] = useState<{ show: boolean, gameId: string, level: number, coins: number } | null>(null);
-
-  useEffect(() => {
-    const savedProgress = localStorage.getItem('r1plus_games_progress');
-    const savedCoins = localStorage.getItem('r1plus_coins');
-    if (savedProgress) setProgress(JSON.parse(savedProgress));
-    if (savedCoins) setCoins(parseInt(savedCoins, 10));
-  }, []);
-
-  const games = [
-    { id: 'sudoku', name: 'Sudoku Pro', icon: '🔢', color: 'bg-blue-500', hover: 'hover:bg-blue-600', desc: 'Entrena tu lógica', totalLevels: 100 },
-    { id: 'tetris', name: 'Tetris Clásico', icon: '🧱', color: 'bg-indigo-500', hover: 'hover:bg-indigo-600', desc: 'Encaja las piezas', totalLevels: 100 },
-    { id: 'sopa', name: 'Sopa de Letras', icon: '🔠', color: 'bg-emerald-500', hover: 'hover:bg-emerald-600', desc: 'Próximamente', totalLevels: 100 },
-    { id: 'candy', name: 'Candy Match', icon: '🍬', color: 'bg-rose-500', hover: 'hover:bg-rose-600', desc: 'Próximamente', totalLevels: 100 },
-  ];
-
-  const handleWinLevel = (score: number) => {
-    if (!activeGame || !selectedLevel) return;
-    const coinsWon = selectedLevel * 10; 
-    const newProgress = { ...progress };
-    
-    if (selectedLevel === progress[activeGame as keyof typeof progress]) {
-      newProgress[activeGame as keyof typeof progress] = Math.min(100, selectedLevel + 1);
-    }
-    const newCoins = coins + coinsWon;
-
-    setProgress(newProgress);
-    setCoins(newCoins);
-    localStorage.setItem('r1plus_games_progress', JSON.stringify(newProgress));
-    localStorage.setItem('r1plus_coins', newCoins.toString());
-    setWinModal({ show: true, gameId: activeGame, level: selectedLevel, coins: coinsWon });
+  const stats = {
+    presupuestado: budgets.filter(b => b.type === 'presupuesto').reduce((acc, b) => acc + Number(b.total || 0), 0),
+    aceptado: budgets.filter(b => b.type === 'presupuesto' && (b.status === 'aceptado' || b.status === 'parcialmente_facturado' || b.status === 'facturado')).reduce((acc, b) => acc + Number(b.total || 0), 0),
+    facturado: budgets.filter(b => b.type === 'factura').reduce((acc, b) => acc + Number(b.total || 0), 0),
+    pendiente: budgets.filter(b => b.type === 'factura' && b.status !== 'cobrada').reduce((acc, b) => acc + Number(b.total || 0), 0),
   };
 
-  const closeWinModal = () => {
-    setWinModal(null);
-    setSelectedLevel(null); 
-  };
-
-  // ---------------------------------------------------------
-  // RENDER JUEGO ACTIVO
-  // ---------------------------------------------------------
-  if (selectedLevel !== null && activeGame) {
-    if (activeGame === 'tetris') return <TetrisGame level={selectedLevel} onBack={() => setSelectedLevel(null)} onWin={handleWinLevel} />;
-    if (activeGame === 'sudoku') return <SudokuGame level={selectedLevel} onBack={() => setSelectedLevel(null)} onWin={handleWinLevel} />;
-    
-    return (
-      <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6 text-center rounded-2xl border border-slate-200">
-        <span className="text-6xl mb-4">🚧</span>
-        <h2 className="text-2xl font-black text-slate-800 mb-2">Juego en Desarrollo</h2>
-        <p className="text-slate-500 font-medium mb-6 max-w-sm">Estamos programando la lógica para el nivel {selectedLevel} de {games.find(g => g.id === activeGame)?.name}. ¡Estará listo en la próxima actualización!</p>
-        <button onClick={() => setSelectedLevel(null)} className="px-6 py-3 bg-slate-200 text-slate-700 rounded-xl font-bold transition">Volver</button>
-      </div>
-    );
-  }
-
-  // ---------------------------------------------------------
-  // RENDER SELECTOR NIVELES
-  // ---------------------------------------------------------
-  if (activeGame) {
-    const game = games.find(g => g.id === activeGame);
-    const maxUnlocked = progress[activeGame as keyof typeof progress];
-
-    return (
-      <div className="h-full flex flex-col bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm animate-in slide-in-from-right-4">
-        {winModal && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/90 p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl animate-in zoom-in-95">
-              <div className="text-7xl mb-4 animate-bounce">🏆</div>
-              <h2 className="text-3xl font-black text-slate-800 mb-1">¡Nivel Superado!</h2>
-              <p className="text-slate-500 font-bold mb-6">Has completado el Nivel {winModal.level}</p>
-              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl mb-8 transform scale-110">
-                <span className="block text-xs uppercase font-black text-amber-600 mb-1">Recompensa</span>
-                <span className="text-4xl font-black text-amber-500">+ {winModal.coins} 🪙</span>
-              </div>
-              <button onClick={closeWinModal} className={`w-full py-4 ${game?.color} text-white rounded-xl font-black text-lg shadow-lg hover:opacity-90 transition`}>Continuar</button>
-            </div>
-          </div>
-        )}
-
-        <div className={`p-4 sm:p-6 ${game?.color} text-white shrink-0 flex justify-between items-center shadow-md relative overflow-hidden`}>
-          <div className="absolute top-0 right-0 opacity-10 text-9xl -mt-4 -mr-4 pointer-events-none">{game?.icon}</div>
-          <div className="flex items-center gap-3 sm:gap-4 relative z-10">
-            <button onClick={() => setActiveGame(null)} className="w-8 h-8 sm:w-10 sm:h-10 bg-black/20 hover:bg-black/30 rounded-full flex items-center justify-center font-bold text-xl transition">←</button>
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2">{game?.name}</h2>
-              <p className="text-white/80 text-xs sm:text-sm font-medium">100 Niveles de dificultad</p>
-            </div>
-          </div>
-          <div className="bg-black/20 px-3 py-1.5 rounded-lg text-sm font-black flex items-center gap-1.5 relative z-10">{coins} 🪙</div>
-        </div>
-        
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50">
-          <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-10 gap-2 sm:gap-3">
-            {Array.from({ length: game?.totalLevels || 100 }).map((_, i) => {
-              const level = i + 1;
-              const isUnlocked = level <= maxUnlocked;
-              const isCurrent = level === maxUnlocked;
-              
-              return (
-                <button
-                  key={level}
-                  disabled={!isUnlocked}
-                  onClick={() => setSelectedLevel(level)}
-                  className={`
-                    relative aspect-square flex flex-col items-center justify-center rounded-2xl font-black text-lg sm:text-xl shadow-sm transition-all duration-300
-                    ${!isUnlocked ? 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-60' : ''}
-                    ${isUnlocked && !isCurrent ? 'bg-white text-slate-700 border-2 border-slate-200 hover:border-slate-300 cursor-pointer' : ''}
-                    ${isCurrent ? `${game?.color} text-white shadow-md transform hover:scale-105 cursor-pointer ring-4 ring-indigo-200 ring-offset-2` : ''}
-                  `}
-                >
-                  {isUnlocked ? level : '🔒'}
-                  {isUnlocked && !isCurrent && level % 10 === 0 && <span className="absolute -top-1.5 -right-1.5 text-sm sm:text-base drop-shadow-md">🎁</span>}
-                  {isCurrent && <span className="absolute -bottom-2 text-[10px] uppercase tracking-widest bg-slate-900 text-white px-2 py-0.5 rounded-full shadow-md">Jugar</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ---------------------------------------------------------
-  // VISTA PRINCIPAL: HUB DE JUEGOS
-  // ---------------------------------------------------------
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 space-y-6 shadow-sm h-full flex flex-col overflow-hidden relative">
-      <div className="shrink-0 flex justify-between items-center border-b border-slate-100 pb-4">
-        <div>
-          <h2 className="text-2xl sm:text-3xl font-black text-slate-800">🎮 Sala Recreativa</h2>
-          <p className="text-slate-500 font-medium text-sm mt-1">Supera niveles y gana monedas para tu cuenta.</p>
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4 shadow-sm h-full flex flex-col overflow-hidden relative">
+      
+      {isGeneratingPdf && (
+        <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-[1000] flex flex-col items-center justify-center rounded-2xl">
+          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3"></div>
+          <p className="font-bold text-slate-800 text-sm">Procesando PDF oficial...</p>
         </div>
-        <div className="bg-amber-50 border border-amber-200 px-4 py-2 rounded-xl shadow-sm text-right flex flex-col items-end">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-amber-600 mb-0.5">Saldo Actual</span>
-          <span className="font-black text-amber-500 text-xl flex items-center gap-1.5">{coins} 🪙</span>
+      )}
+
+      {/* CABECERA CON BOTONES */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+        <div><h2 className="text-xl font-black text-slate-800">📁 Panel FSM & CRM</h2></div>
+        <div className="flex flex-wrap gap-2">
+          {docTab === 'clientes' ? (
+            <button onClick={openNewCrmModal} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold shadow-md hover:bg-indigo-700 transition">+ Alta Cliente</button>
+          ) : (
+            <>
+              <button onClick={() => setShowStatsModal(true)} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold shadow-md hover:bg-slate-900 transition">📊 Estadísticas</button>
+              <button onClick={() => setShowCatalogItemModal(true)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold border hover:bg-slate-200 transition">+ Partida</button>
+              <button onClick={handleOpenAddBudget} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold shadow-md hover:bg-indigo-700 transition">+ Presupuesto</button>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 h-full max-h-[600px]">
-          {games.map(game => {
-            const pctComplete = (progress[game.id as keyof typeof progress] / game.totalLevels) * 100;
-            return (
-              <button
-                key={game.id}
-                onClick={() => setActiveGame(game.id)}
-                className={`relative overflow-hidden flex flex-col items-center justify-center p-6 sm:p-8 rounded-3xl text-white shadow-lg hover:shadow-2xl transition-all transform hover:-translate-y-1 ${game.color} ${game.hover} group`}
+      <div className="flex gap-2 border-b border-slate-100 pb-2 overflow-x-auto no-scrollbar shrink-0">
+        <button onClick={() => setDocTab('presupuestos')} className={`px-4 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${docTab === 'presupuestos' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>Presupuestos</button>
+        <button onClick={() => setDocTab('facturas')} className={`px-4 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${docTab === 'facturas' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>Facturas</button>
+        <button onClick={() => setDocTab('ordenes')} className={`px-4 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ${docTab === 'ordenes' ? 'bg-amber-50 text-amber-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛠️ Órdenes</button>
+        <button onClick={() => setDocTab('clientes')} className={`px-4 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap ml-auto border ${docTab === 'clientes' ? 'bg-slate-800 text-white border-slate-800' : 'text-slate-700 hover:bg-slate-100 border-slate-300'}`}>👥 CRM Clientes</button>
+      </div>
+
+      {docTab === 'clientes' && (
+        <div className="shrink-0">
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="🔍 Buscar por nombre, teléfono, empresa, CIF, ciudad..."
+              value={crmSearchQuery}
+              onChange={e => setCrmSearchQuery(e.target.value)}
+              className="w-full p-2.5 pl-3 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white text-xs font-medium focus:outline-none focus:border-indigo-500 shadow-sm transition"
+            />
+            {crmSearchQuery && (
+              <button onClick={() => setCrmSearchQuery('')} className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600 font-bold">✕</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto space-y-3 pb-6">
+        {isLoading ? <div className="text-center py-6 text-slate-400 text-sm font-medium">Sincronizando...</div> : docTab === 'clientes' ? (
+          filteredCrmList.length === 0 ? (
+            <div className="text-center py-10 text-slate-500 text-sm font-medium bg-slate-50 rounded-xl border border-dashed border-slate-300">
+              {crmSearchQuery ? 'No se encontraron clientes para esta búsqueda.' : 'No hay clientes en el CRM.'}
+            </div>
+          ) : (
+            filteredCrmList.map(client => (
+              <div 
+                key={client.id} 
+                onClick={() => openEditCrmModal(client)}
+                className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:border-indigo-400 hover:shadow-md transition cursor-pointer"
               >
-                <div className="absolute inset-0 bg-black/10 group-hover:bg-transparent transition duration-300"></div>
-                <span className="text-6xl sm:text-7xl mb-4 filter drop-shadow-md group-hover:scale-110 transition duration-300">{game.icon}</span>
-                <h3 className="text-xl sm:text-2xl font-black tracking-tight z-10">{game.name}</h3>
-                <p className="text-white/90 font-medium mt-1 text-sm sm:text-base z-10">{game.desc}</p>
-                
-                <div className="mt-6 w-full max-w-[200px] z-10">
-                  <div className="flex justify-between text-[10px] font-bold uppercase mb-1">
-                    <span>Nivel {progress[game.id as keyof typeof progress]}</span>
-                    <span>100</span>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-black text-lg shrink-0">
+                    {client.name.charAt(0)}
                   </div>
-                  <div className="w-full bg-black/20 h-2 rounded-full overflow-hidden backdrop-blur-sm border border-white/20">
-                    <div className="bg-white h-full rounded-full transition-all duration-1000" style={{ width: `${pctComplete}%` }}></div>
+                  <div className="min-w-0">
+                    <h4 className="font-black text-slate-800 text-sm truncate">{client.name}</h4>
+                    <p className="text-xs font-medium text-slate-500 truncate">
+                      {client.company || 'Particular'} · {client.phone} {client.city ? `· ${client.city}` : ''}
+                    </p>
                   </div>
                 </div>
-              </button>
-            )
-          })}
-        </div>
+                <button onClick={(e) => { e.stopPropagation(); openEditCrmModal(client); }} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold transition w-full sm:w-auto">Abrir Ficha</button>
+              </div>
+            ))
+          )
+        ) : docTab === 'ordenes' ? (
+          workOrders.filter(wo => wo.status === 'en_curso').length === 0 ? (
+            <div className="text-center py-10 text-slate-500 font-bold bg-slate-50 rounded-xl border border-dashed border-slate-300">No hay órdenes de obra en ejecución.</div>
+          ) : (
+            workOrders.filter(wo => wo.status === 'en_curso').map(order => (
+              <div 
+                key={order.id} 
+                onClick={() => openWorkOrderPanel(order)}
+                className="p-4 bg-slate-50 border border-slate-200 hover:border-indigo-400 hover:shadow-md transition rounded-xl flex items-center justify-between gap-4 shadow-sm cursor-pointer"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xl">🏗️</span>
+                    <span className="font-black text-slate-800 text-sm truncate">{order.client_name}</span>
+                  </div>
+                  <div className="text-xs text-indigo-700 font-bold truncate">
+                    Ref. Obra: <span className="font-mono text-slate-800">{order.work_order_ref || 'Sin referencia'}</span>
+                  </div>
+                  <span className="inline-block mt-2 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700">
+                    En Ejecución
+                  </span>
+                </div>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); openWorkOrderPanel(order); }} 
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold shadow-md transition shrink-0"
+                >
+                  Abrir Obra
+                </button>
+              </div>
+            ))
+          )
+        ) : (
+          filteredBudgets.map(b => (
+            <div 
+              key={b.id} 
+              onMouseDown={() => handleDocPressStart(b)}
+              onMouseUp={handleDocPressEnd}
+              onMouseLeave={handleDocPressEnd}
+              onTouchStart={() => handleDocPressStart(b)}
+              onTouchEnd={handleDocPressEnd}
+              onTouchMove={handleDocPressEnd}
+              className={`p-4 bg-white border border-slate-200 rounded-xl shadow-sm space-y-3 relative overflow-hidden transition select-none ${b.status === 'cobrada' ? 'border-emerald-300 bg-emerald-50/20' : ''}`}
+            >
+              {b.status === 'aceptado' && <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500"></div>}
+              {b.status === 'rechazado' && <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-500"></div>}
+              {b.status === 'cobrada' && <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-600"></div>}
+              {(b.status === 'pendiente' || !b.status) && <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-400"></div>}
+              {b.status === 'pendiente_cobro' && <div className="absolute top-0 left-0 w-1.5 h-full bg-orange-400"></div>}
+              {b.status === 'parcialmente_facturado' && <div className="absolute top-0 left-0 w-1.5 h-full bg-sky-500"></div>}
+              
+              <div className="flex justify-between items-center pl-2">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{docTab === 'presupuestos' ? '📄' : '🧾'}</span>
+                  <div>
+                    <div className="font-black text-slate-800 text-sm">{b.code}</div>
+                    {b.work_order_ref && (
+                      <div className="text-[11px] font-bold text-indigo-600">Ref: {b.work_order_ref}</div>
+                    )}
+                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">{b.client}</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="font-black text-indigo-600 text-base">{Number(b.total).toFixed(2)} €</span>
+                  {b.status === 'cobrada' && <div className="text-[9px] font-bold text-emerald-600 uppercase mt-0.5">Pagada: {b.payment_method}</div>}
+                  {b.status === 'pendiente_cobro' && <div className="text-[9px] font-bold text-orange-500 uppercase mt-0.5">Pendiente Cobro</div>}
+                </div>
+              </div>
+              
+              <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-100 pl-2">
+                <button onClick={() => setSharingDocument(b)} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 transition text-white rounded-lg text-[11px] font-bold shadow-md mr-auto">📤 Enviar PDF</button>
+                {docTab === 'presupuestos' && (b.status === 'pendiente' || !b.status) && (
+                  <>
+                    <button onClick={() => handleRejectBudget(b.id)} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 transition text-rose-700 rounded-lg text-[11px] font-bold border border-rose-200">Rechazar</button>
+                    <button onClick={() => handleAcceptBudget(b)} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 transition text-white rounded-lg text-[11px] font-bold shadow-md">Aceptar Obra</button>
+                  </>
+                )}
+                {docTab === 'presupuestos' && b.status === 'aceptado' && (
+                  <>
+                    <button onClick={() => setDocTab('ordenes')} className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 transition text-amber-800 rounded-lg text-[11px] font-bold border border-amber-200">🛠️ Ver Obra</button>
+                    <button onClick={() => handleOpenInvoiceModal(b)} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg text-[11px] font-bold shadow-md">🧾 Facturar</button>
+                  </>
+                )}
+                {docTab === 'presupuestos' && b.status === 'parcialmente_facturado' && (
+                  <>
+                    <button onClick={() => handleOpenRestInvoiceModal(b)} className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 transition text-white rounded-lg text-[11px] font-bold shadow-md">🧾 Facturar Resto</button>
+                  </>
+                )}
+                {docTab === 'facturas' && (
+                  <>
+                    {b.status !== 'cobrada' && (
+                      <button onClick={() => handleOpenPaymentModal(b)} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 transition text-white rounded-lg text-[11px] font-bold shadow-sm">💶 Cobrar</button>
+                    )}
+                    <button onClick={() => handleRevertToBudget(b)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg text-[11px] font-bold border border-slate-300">🔄 Volver a Presup.</button>
+                    <button onClick={() => handleGeneratePdfAction(b, 'download')} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg text-[11px] font-bold shadow-sm">⬇️ PDF</button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))
+        )}
       </div>
+
+      {/* MODAL CREADOR DE PRESUPUESTO CON EL FORMULARIO INTEGRAL */}
+      {showAddBudgetModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 overflow-y-auto backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto my-auto animate-in zoom-in-95">
+            
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 shrink-0 gap-3">
+              <h3 className="font-black text-lg text-slate-800">📄 Creador de Presupuesto</h3>
+              <div className="flex items-center gap-2">
+                {isScanning ? (
+                  <span className="px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black shadow-sm">
+                    ⏳ Analizando Imagen...
+                  </span>
+                ) : (
+                  <div className="flex gap-2">
+                    <label className="px-3 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black cursor-pointer hover:bg-emerald-100 transition flex items-center gap-1 shadow-sm" title="Hacer foto nueva">
+                      📸 Cámara
+                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleScanWorkOrder} />
+                    </label>
+                    <label className="px-3 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-black cursor-pointer hover:bg-indigo-100 transition flex items-center gap-1 shadow-sm" title="Elegir de la galería">
+                      🖼️ Galería
+                      <input type="file" accept="image/*" className="hidden" onChange={handleScanWorkOrder} />
+                    </label>
+                  </div>
+                )}
+                <button type="button" onClick={() => setShowAddBudgetModal(false)} className="w-8 h-8 ml-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition">✕</button>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveBudget} className="space-y-4 text-xs">
+              
+              {/* NUEVA SECCIÓN: DATOS DEL CLIENTE INTEGRALES */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                <div className="flex justify-between items-end border-b border-slate-200 pb-2 mb-2">
+                  <h4 className="font-black text-indigo-700 text-xs uppercase tracking-widest">Datos del Cliente</h4>
+                  {bClientId ? (
+                    <span className="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold">✅ Vinculado a CRM</span>
+                  ) : (
+                    <span className="text-[9px] bg-amber-100 text-amber-700 px-2 py-1 rounded font-bold">🆕 Nuevo Cliente (Se guardará)</span>
+                  )}
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative">
+                  <div className="sm:col-span-2 relative">
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Nombre o Empresa *</label>
+                    <input 
+                      type="text" required 
+                      placeholder="Escribe para buscar un cliente existente o escanea un parte..." 
+                      value={bClient} 
+                      onChange={handleClientInput} 
+                      onFocus={() => bClient.trim() && setShowSuggestions(true)} 
+                      onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} 
+                      className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 font-bold outline-none transition" 
+                    />
+                    {showSuggestions && filteredSuggestions.length > 0 && (
+                      <div className="absolute top-[60px] z-50 w-full bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
+                        {filteredSuggestions.map(cli => (
+                          <div key={cli.id} onClick={() => handleSelectSuggestion(cli)} className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 font-bold transition flex justify-between items-center">
+                            <span>{cli.company ? `${cli.name} (${cli.company})` : cli.name}</span>
+                            <span className="text-slate-400 font-normal">{cli.phone}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">CIF / NIF</label>
+                    <input type="text" value={bCif} onChange={e => setBCif(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition font-mono" />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Teléfono</label>
+                    <input type="tel" value={bPhone} onChange={e => setBPhone(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition font-mono" />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Correo Electrónico</label>
+                    <input type="email" value={bEmail} onChange={e => setBEmail(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
+                  </div>
+                  {/* NUEVO CAMPO: Persona de contacto */}
+                  <div>
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Persona de Contacto</label>
+                    <input type="text" placeholder="Ej. Juan, Marta..." value={bContact} onChange={e => setBContact(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Dirección Completa</label>
+                    <input type="text" value={bAddress} onChange={e => setBAddress(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
+                  </div>
+                </div>
+              </div>
+
+              {/* SECCIÓN DEL PROYECTO */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Código Presupuesto</label>
+                  <input type="text" readOnly value={bCode} className="w-full p-2.5 border border-slate-300 bg-slate-100 rounded-lg font-bold font-mono text-slate-700 outline-none" />
+                </div>
+                <div>
+                  <label className="block font-bold text-indigo-700 mb-1 text-[10px] uppercase">Referencia de Obra *</label>
+                  <input type="text" required placeholder="Ej. Reforma Cocina" value={bWorkOrderRef} onChange={e => setBWorkOrderRef(e.target.value)} className="w-full p-2.5 border-2 border-indigo-200 bg-indigo-50/30 rounded-lg font-bold focus:border-indigo-600 focus:outline-none transition" />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Validez hasta</label>
+                  <input type="date" value={bValidUntil} onChange={e => setBValidUntil(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg font-medium focus:border-indigo-500 focus:outline-none transition" />
+                </div>
+              </div>
+
+              {/* PARTIDAS DEL PRESUPUESTO */}
+              <div className="space-y-2 pt-3 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-1">
+                  <h4 className="font-bold text-slate-800">Partidas y Materiales</h4>
+                  <button type="button" onClick={handleAddItemRow} className="px-2 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded font-bold hover:bg-indigo-100 transition">+ Línea</button>
+                </div>
+                {bItems.map((item, index) => (
+                  <div key={index} className="flex flex-col sm:flex-row gap-2 relative bg-slate-50 p-2 rounded-lg border border-slate-200">
+                    <input type="text" value={item.desc} onChange={e => { const u = [...bItems]; u[index].desc = e.target.value; setBItems(u); }} onFocus={() => setActiveItemIndex(index)} onBlur={() => setTimeout(() => setActiveItemIndex(null), 200)} className="flex-1 p-2 border border-slate-300 rounded-md focus:border-indigo-500 focus:outline-none transition" placeholder="Descripción..." />
+                    {activeItemIndex === index && getFilteredCatalog(item.desc).length > 0 && (
+                      <div className="absolute top-10 z-50 w-full bg-white border border-slate-200 shadow-xl max-h-40 overflow-y-auto rounded-lg">
+                        {getFilteredCatalog(item.desc).map(cat => <div key={cat.id} onClick={() => { const u = [...bItems]; u[index].desc = cat.description; u[index].price = cat.price; setBItems(u); setActiveItemIndex(null); }} className="p-3 hover:bg-indigo-50 cursor-pointer font-medium border-b border-slate-100 transition">{cat.description} <span className="font-black text-indigo-600 ml-2">({cat.price}€)</span></div>)}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <div className="w-16"><input type="number" value={item.qty} onChange={e => { const u = [...bItems]; u[index].qty = Number(e.target.value); setBItems(u); }} className="w-full p-2 border border-slate-300 rounded-md text-center font-bold focus:border-indigo-500 focus:outline-none transition" placeholder="Cant." /></div>
+                      <div className="w-20 relative"><input type="number" step="0.01" value={item.price} onChange={e => { const u = [...bItems]; u[index].price = Number(e.target.value); setBItems(u); }} className="w-full p-2 border border-slate-300 rounded-md text-right font-bold pr-5 focus:border-indigo-500 focus:outline-none transition" placeholder="Precio" /><span className="absolute right-1.5 top-2 text-slate-400 font-bold">€</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-slate-800 text-white p-3 rounded-lg flex items-center justify-between mt-2 shadow-md">
+                <span className="font-bold uppercase tracking-wider text-slate-300">Total IVA Inc.</span><span className="font-black text-lg">{calculatedTotal.toFixed(2)} €</span>
+              </div>
+              <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg shadow-md transition cursor-pointer mt-2 text-sm">Guardar y PDF</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ESTADÍSTICAS */}
+      {showStatsModal && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95">
+            <div className="bg-slate-900 p-4 flex justify-between items-center text-white">
+              <h3 className="font-black text-lg">📊 Estadísticas Globales</h3>
+              <button onClick={() => setShowStatsModal(false)} className="w-8 h-8 bg-slate-800 rounded-full font-bold hover:bg-slate-700 flex items-center justify-center">✕</button>
+            </div>
+            <div className="p-5 space-y-4 bg-slate-50">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Presupuestado</span>
+                  <span className="font-black text-lg text-slate-800">{stats.presupuestado.toFixed(2)} €</span>
+                </div>
+                <div className="bg-emerald-50 p-4 rounded-xl shadow-sm border border-emerald-200">
+                  <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest block">Aceptado</span>
+                  <span className="font-black text-lg text-emerald-800">{stats.aceptado.toFixed(2)} €</span>
+                </div>
+              </div>
+              <div className="bg-indigo-50 p-4 rounded-xl shadow-sm border border-indigo-100">
+                <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest block">Total Facturado</span>
+                <span className="font-black text-2xl text-indigo-800">{stats.facturado.toFixed(2)} €</span>
+              </div>
+              <div className="bg-rose-50 p-4 rounded-xl shadow-sm border border-rose-100 relative overflow-hidden">
+                <div className="absolute top-0 right-0 bottom-0 w-2 bg-rose-500"></div>
+                <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest block">Pendiente de Cobro</span>
+                <span className="font-black text-3xl text-rose-700">{stats.pendiente.toFixed(2)} €</span>
+              </div>
+
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
+                <div className="flex justify-between items-center text-xs font-bold">
+                  <span className="text-slate-600 flex items-center gap-1.5">💾 Espacio en Disco Utilizado</span>
+                  <span className="text-indigo-600">{storageUsedMB} MB / 500 MB</span>
+                </div>
+                <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-indigo-600 h-full rounded-full transition-all duration-500" 
+                    style={{ width: `${Math.min(100, (storageUsedMB / 500) * 100)}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 text-center font-medium">Plan Base Activo. Ampliable a 10 GB / 50 GB.</p>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL MANDO DE OBRA */}
+      {activeWorkOrder && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/80 p-0 sm:p-4 transition-all backdrop-blur-sm">
+          <div className="bg-white w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-3xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95">
+            <div className="bg-slate-900 p-4 text-white shrink-0">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-600 text-white px-2 py-0.5 rounded-md">Gestión de Obra</span>
+                  <h3 className="text-xl font-black mt-2 leading-tight">{activeWorkOrder.client_name}</h3>
+                  <p className="text-xs text-indigo-300 font-bold mt-0.5">
+                    Referencia de Obra: <span className="text-white font-mono">{activeWorkOrder.work_order_ref || 'Sin Ref'}</span>
+                  </p>
+                </div>
+                <button onClick={() => setActiveWorkOrder(null)} className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center font-bold text-white cursor-pointer text-lg">✕</button>
+              </div>
+              <div className="flex gap-4 mt-4 border-b border-slate-700 overflow-x-auto no-scrollbar">
+                <button onClick={() => setWoTab('info')} className={`pb-2 text-[11px] font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${woTab === 'info' ? 'border-b-2 border-indigo-400 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Resumen</button>
+                <button onClick={() => setWoTab('gastos')} className={`pb-2 text-[11px] font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${woTab === 'gastos' ? 'border-b-2 border-indigo-400 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Gastos & Tickets</button>
+                <button onClick={() => setWoTab('archivos')} className={`pb-2 text-[11px] font-bold uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${woTab === 'archivos' ? 'border-b-2 border-indigo-400 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Archivos & Planos</button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 bg-slate-50">
+              {woTab === 'info' && (
+                <div className="space-y-4">
+                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="text-xs text-slate-500 uppercase font-bold">Estado Actual</span>
+                      <div className={`font-black text-lg uppercase mt-0.5 ${activeWorkOrder.status === 'finalizada' ? 'text-emerald-600' : 'text-amber-600'}`}>{activeWorkOrder.status.replace('_', ' ')}</div>
+                    </div>
+                    {activeWorkOrder.status === 'en_curso' ? (
+                      <button onClick={() => handleFinishWorkOrder(activeWorkOrder.id)} className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 transition text-white rounded-lg text-sm font-bold shadow-md cursor-pointer">Finalizar Obra</button>
+                    ) : (
+                      <span className="px-4 py-2 bg-slate-100 text-slate-500 rounded-lg text-xs font-bold border border-slate-200 flex items-center justify-center">Obra Cerrada</span>
+                    )}
+                  </div>
+                  <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <span className="text-xs text-slate-500 uppercase font-bold">Total Gastos Anotados</span>
+                    <div className="font-black text-rose-600 text-2xl mt-1">{woExpenses.reduce((acc, e) => acc + Number(e.amount), 0).toFixed(2)} €</div>
+                  </div>
+                </div>
+              )}
+              {woTab === 'gastos' && (
+                <div className="space-y-4">
+                  {activeWorkOrder.status === 'en_curso' && (
+                    <form onSubmit={handleAddExpense} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                      <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Añadir Nuevo Gasto</h4>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input type="text" required placeholder="Concepto (Ej. Materiales, Mano de obra)" value={newExpenseDesc} onChange={e => setNewExpenseDesc(e.target.value)} className="flex-1 p-2.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-indigo-500 font-medium" />
+                        <input type="number" step="0.01" required placeholder="150.00" value={newExpenseAmount} onChange={e => setNewExpenseAmount(e.target.value ? Number(e.target.value) : '')} className="w-full sm:w-28 p-2.5 rounded-lg border border-slate-300 text-sm font-bold text-center focus:outline-none focus:border-indigo-500" />
+                        <button type="submit" className="px-4 py-2.5 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition shadow-md text-sm w-full sm:w-auto">Añadir</button>
+                      </div>
+                    </form>
+                  )}
+                  <div className="space-y-2">
+                    {woExpenses.length === 0 ? <p className="text-sm text-slate-500 text-center py-6 font-medium">No hay gastos registrados en esta orden.</p> :
+                      woExpenses.map(exp => (
+                        <div key={exp.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 text-sm shadow-sm">
+                          <span className="font-bold text-slate-800">{exp.description}</span><span className="font-black text-rose-600 text-base">-{Number(exp.amount).toFixed(2)} €</span>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
+              {woTab === 'archivos' && (
+                <div className="space-y-4">
+                  {activeWorkOrder.status === 'en_curso' && (
+                    <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-indigo-900">Adjuntar Planos o Tickets</h4>
+                        <p className="text-xs text-indigo-700 mt-0.5">Sube imágenes o PDFs para trazabilidad.</p>
+                      </div>
+                      <label className="bg-indigo-600 text-white px-4 py-2.5 rounded-lg text-sm font-bold shadow-md cursor-pointer hover:bg-indigo-700 transition w-full sm:w-auto text-center">
+                        + Subir Archivo
+                        <input type="file" accept="image/*,.pdf" className="hidden" onChange={handleUploadPhoto} />
+                      </label>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {woAttachments.length === 0 ? <div className="col-span-2 sm:col-span-3 text-sm text-slate-500 text-center py-6 font-medium">No hay archivos adjuntos.</div> :
+                      woAttachments.map(att => (
+                        <div key={att.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm relative group">
+                          {att.type === 'foto' || att.file_url.match(/\.(jpeg|jpg|gif|png)$/i) ? (
+                            <img src={att.file_url} alt={att.file_name} className="w-full h-32 object-cover" />
+                          ) : (
+                            <div className="w-full h-32 bg-slate-100 flex flex-col items-center justify-center p-2 text-center">
+                              <span className="text-3xl mb-2">📄</span>
+                              <span className="text-[10px] font-bold text-slate-500 truncate w-full">{att.file_name}</span>
+                            </div>
+                          )}
+                          <a href={att.file_url} target="_blank" rel="noopener noreferrer" className="block text-center py-2 bg-slate-50 text-[10px] font-bold text-indigo-600 hover:bg-slate-100 border-t border-slate-200 transition">Ver / Descargar</a>
+                          {activeWorkOrder.status === 'en_curso' && (
+                            <button onClick={() => handleDeleteAttachment(att.id)} className="absolute top-2 right-2 bg-rose-500 hover:bg-rose-600 transition text-white w-6 h-6 rounded-full flex items-center justify-center text-xs shadow-md">✕</button>
+                          )}
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL COBRAR FACTURA */}
+      {paymentModal.show && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl space-y-4 animate-in zoom-in-95">
+            <h3 className="font-black text-xl text-slate-800 border-b border-slate-100 pb-3">💶 Registrar Cobro</h3>
+            <p className="text-sm text-slate-600 font-medium">¿Cómo te ha pagado el cliente la factura <strong>{paymentModal.invoice?.code}</strong>?</p>
+            <div className="space-y-2">
+              <label className={`flex items-center gap-3 p-4 border rounded-xl cursor-pointer transition font-bold ${paymentModal.method === 'Transferencia Bancaria' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600'}`}>
+                <input type="radio" name="payment" value="Transferencia Bancaria" checked={paymentModal.method === 'Transferencia Bancaria'} onChange={e => setPaymentModal({...paymentModal, method: e.target.value})} className="accent-indigo-600 w-4 h-4" />
+                🏦 Transferencia Bancaria
+              </label>
+              <label className={`flex items-center gap-3 p-4 border rounded-xl cursor-pointer transition font-bold ${paymentModal.method === 'Bizum' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600'}`}>
+                <input type="radio" name="payment" value="Bizum" checked={paymentModal.method === 'Bizum'} onChange={e => setPaymentModal({...paymentModal, method: e.target.value})} className="accent-indigo-600 w-4 h-4" />
+                📱 Bizum
+              </label>
+              <label className={`flex items-center gap-3 p-4 border rounded-xl cursor-pointer transition font-bold ${paymentModal.method === 'Efectivo' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600'}`}>
+                <input type="radio" name="payment" value="Efectivo" checked={paymentModal.method === 'Efectivo'} onChange={e => setPaymentModal({...paymentModal, method: e.target.value})} className="accent-indigo-600 w-4 h-4" />
+                💵 Efectivo Metálico
+              </label>
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button onClick={() => setPaymentModal({ show: false, invoice: null, method: 'Transferencia Bancaria' })} className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-lg font-bold text-sm">Cancelar</button>
+              <button onClick={handleConfirmPayment} className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-black text-sm shadow-md">Confirmar Pago</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL FACTURAR PORCENTAJE (ANTICIPOS) */}
+      {invoiceModal.show && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl space-y-4 animate-in zoom-in-95">
+            <h3 className="font-black text-xl text-slate-800 border-b border-slate-100 pb-3">🧾 Generar Factura</h3>
+            <p className="text-sm text-slate-600 font-medium">¿Qué porcentaje del presupuesto quieres facturar ahora?</p>
+            <div className="text-center py-4">
+              <span className="text-5xl font-black text-indigo-600">{invoiceModal.percentage}%</span>
+              <p className="text-xs text-slate-400 mt-2 uppercase tracking-widest font-bold">
+                Total a facturar: <span className="text-slate-800">{(Number(invoiceModal.budget?.total) * (invoiceModal.percentage / 100)).toFixed(2)} €</span>
+              </p>
+            </div>
+            <input type="range" min="1" max="100" value={invoiceModal.percentage} onChange={e => setInvoiceModal({...invoiceModal, percentage: Number(e.target.value)})} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600" />
+            <div className="flex justify-between px-1">
+              <span className="text-xs font-bold text-slate-400">1% (Anticipo)</span>
+              <span className="text-xs font-bold text-slate-400">100% (Total)</span>
+            </div>
+            <div className="flex gap-3 pt-4 border-t border-slate-100">
+              <button onClick={() => setInvoiceModal({ show: false, budget: null, percentage: 100 })} className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-lg font-bold text-sm">Cancelar</button>
+              <button onClick={handleConfirmInvoice} className="flex-[2] py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-black text-sm shadow-md">Crear Factura</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL FACTURAR RESTO */}
+      {restInvoiceModal.show && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto my-auto animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 shrink-0">
+              <div>
+                <h3 className="font-black text-lg text-slate-800">🧾 Facturar Resto de Obra</h3>
+                <p className="text-xs text-rose-500 font-bold mt-1">Anticipo ya facturado: -{restInvoiceModal.alreadyInvoicedSubtotal.toFixed(2)} €</p>
+              </div>
+              <button onClick={() => setRestInvoiceModal({ show: false, budget: null, items: [], alreadyInvoicedSubtotal: 0, activeItemIndex: null })} className="text-slate-400 hover:text-slate-600 font-bold text-xl transition">✕</button>
+            </div>
+            <form onSubmit={handleConfirmRestInvoice} className="space-y-4 text-xs">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between mb-1">
+                  <h4 className="font-bold text-slate-800">Ajustar Partidas Finales (Añadir o quitar extras)</h4>
+                  <button type="button" onClick={() => setRestInvoiceModal(prev => ({...prev, items: [...prev.items, { desc: '', qty: 1, price: 0 }]}))} className="px-2 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded font-bold hover:bg-indigo-100 transition">+ Añadir Extra</button>
+                </div>
+                {restInvoiceModal.items.map((item, index) => (
+                  <div key={index} className="flex flex-col sm:flex-row gap-2 relative bg-slate-50 p-2 rounded-lg border border-slate-200">
+                    <input type="text" value={item.desc} onChange={e => { const u = [...restInvoiceModal.items]; u[index].desc = e.target.value; setRestInvoiceModal(p => ({...p, items: u})); }} onFocus={() => setRestInvoiceModal(p => ({...p, activeItemIndex: index}))} onBlur={() => setTimeout(() => setRestInvoiceModal(p => ({...p, activeItemIndex: null})), 200)} className="flex-1 p-2 border border-slate-300 rounded-md focus:border-indigo-500 focus:outline-none transition" placeholder="Descripción..." />
+                    {restInvoiceModal.activeItemIndex === index && getFilteredCatalog(item.desc).length > 0 && (
+                      <div className="absolute top-10 z-50 w-full bg-white border border-slate-200 shadow-xl max-h-40 overflow-y-auto rounded-lg">
+                        {getFilteredCatalog(item.desc).map(cat => <div key={cat.id} onClick={() => { const u = [...restInvoiceModal.items]; u[index].desc = cat.description; u[index].price = cat.price; setRestInvoiceModal(p => ({...p, items: u, activeItemIndex: null})); }} className="p-3 hover:bg-indigo-50 cursor-pointer font-medium border-b border-slate-100 transition">{cat.description} <span className="font-black text-indigo-600 ml-2">({cat.price}€)</span></div>)}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <div className="w-16"><input type="number" value={item.qty} onChange={e => { const u = [...restInvoiceModal.items]; u[index].qty = Number(e.target.value); setRestInvoiceModal(p => ({...p, items: u})); }} className="w-full p-2 border border-slate-300 rounded-md text-center font-bold focus:border-indigo-500 focus:outline-none transition" /></div>
+                      <div className="w-20 relative"><input type="number" step="0.01" value={item.price} onChange={e => { const u = [...restInvoiceModal.items]; u[index].price = Number(e.target.value); setRestInvoiceModal(p => ({...p, items: u})); }} className="w-full p-2 border border-slate-300 rounded-md text-right font-bold pr-5 focus:border-indigo-500 focus:outline-none transition" /><span className="absolute right-1.5 top-2 text-slate-400 font-bold">€</span></div>
+                      <button type="button" onClick={() => { const u = [...restInvoiceModal.items]; u.splice(index, 1); setRestInvoiceModal(p => ({...p, items: u})); }} className="w-8 flex items-center justify-center bg-rose-100 text-rose-600 rounded-md hover:bg-rose-200 transition font-bold">✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-slate-800 text-white p-3 rounded-lg flex items-center justify-between mt-2 shadow-md">
+                <span className="font-bold uppercase tracking-wider text-slate-300">Total a Facturar Ahora (IVA Inc.)</span>
+                <span className="font-black text-xl text-emerald-400">{calculatedFinalTotalRest.toFixed(2)} €</span>
+              </div>
+              <button type="submit" className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-lg shadow-md transition cursor-pointer mt-2 text-sm">Generar Factura Final y Cerrar</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ENVIAR PDF */}
+      {sharingDocument && (
+        <div className="fixed inset-0 z-[200] flex flex-col justify-end sm:justify-center bg-black/60 p-0 sm:p-4 backdrop-blur-sm transition-all">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-sm shadow-2xl flex flex-col mx-auto animate-in slide-in-from-bottom-5">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="font-black text-lg text-slate-800">Enviar Documento</h3>
+              <button onClick={() => setSharingDocument(null)} className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 font-bold text-slate-600 flex items-center justify-center">✕</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-slate-600 text-center mb-2 font-medium">Se va a generar el PDF oficial de <strong>{sharingDocument.code}</strong>. ¿Cómo quieres enviarlo?</p>
+              <button onClick={() => handleGeneratePdfAction(sharingDocument, 'whatsapp')} className="w-full flex items-center justify-center gap-3 py-4 bg-[#25D366] hover:bg-[#1ebe5d] text-white rounded-xl font-bold text-lg shadow-md transition">
+                <span className="text-2xl">💬</span> Enviar por WhatsApp
+              </button>
+              <button onClick={() => handleGeneratePdfAction(sharingDocument, 'email')} className="w-full flex items-center justify-center gap-3 py-4 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold text-lg shadow-md transition">
+                <span className="text-2xl">📧</span> Enviar por Email
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CRM ALTA/EDICIÓN */}
+      {showCrmModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 p-2 sm:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-4xl p-0 shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
+            <div className="bg-slate-900 p-4 sm:p-5 flex justify-between items-center shrink-0">
+              <h3 className="font-black text-white text-lg flex items-center gap-2">👤 {crmForm.id ? `Ficha: ${crmForm.name}` : 'Alta de Nuevo Cliente'}</h3>
+              <button onClick={() => setShowCrmModal(false)} className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center font-bold">✕</button>
+            </div>
+            {crmForm.id && (
+              <div className="flex bg-slate-800 px-4 pt-2 border-b border-slate-700 shrink-0 overflow-x-auto no-scrollbar">
+                <button onClick={() => setCrmTab('datos')} className={`pb-3 px-2 text-xs font-bold uppercase tracking-wider transition whitespace-nowrap ${crmTab === 'datos' ? 'border-b-2 border-indigo-400 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Datos Generales</button>
+                <button onClick={() => setCrmTab('historial')} className={`pb-3 px-2 text-xs font-bold uppercase tracking-wider transition whitespace-nowrap ${crmTab === 'historial' ? 'border-b-2 border-indigo-400 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Trazabilidad & Proyectos</button>
+              </div>
+            )}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50">
+              {crmTab === 'datos' && (
+                <form id="crmFormId" onSubmit={handleSaveCrmClient} className="space-y-6">
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <h4 className="font-black text-indigo-700 text-xs uppercase tracking-widest border-b border-slate-100 pb-2">1. Datos Personales y Localización</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                      <div className="sm:col-span-2 lg:col-span-2"><label className="block font-bold text-slate-600 mb-1">Nombre Completo *</label><input required type="text" value={crmForm.name} onChange={e => setCrmForm({...crmForm, name: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-bold focus:border-indigo-500 focus:outline-none bg-slate-50" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">DNI / NIE</label><input type="text" value={crmForm.cif} onChange={e => setCrmForm({...crmForm, cif: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Teléfono Personal</label><input type="tel" value={crmForm.phone} onChange={e => setCrmForm({...crmForm, phone: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-4"><label className="block font-bold text-slate-600 mb-1">Correo Electrónico</label><input type="email" value={crmForm.email} onChange={e => setCrmForm({...crmForm, email: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-3"><label className="block font-bold text-slate-600 mb-1">Calle / Avenida / Plaza</label><input type="text" value={crmForm.street} onChange={e => setCrmForm({...crmForm, street: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Número / Piso</label><input type="text" value={crmForm.street_number} onChange={e => setCrmForm({...crmForm, street_number: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Código Postal</label><input type="text" value={crmForm.postal_code} onChange={e => setCrmForm({...crmForm, postal_code: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-1"><label className="block font-bold text-slate-600 mb-1">Población / Localidad</label><input type="text" value={crmForm.population} onChange={e => setCrmForm({...crmForm, population: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-1"><label className="block font-bold text-slate-600 mb-1">Ciudad / Provincia</label><input type="text" value={crmForm.city} onChange={e => setCrmForm({...crmForm, city: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-1"><label className="block font-bold text-slate-600 mb-1">País</label><input type="text" value={crmForm.country} onChange={e => setCrmForm({...crmForm, country: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                    </div>
+                  </div>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <h4 className="font-black text-slate-700 text-xs uppercase tracking-widest border-b border-slate-100 pb-2">2. Datos de Facturación / Empresa</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                      <div className="sm:col-span-2"><label className="block font-bold text-slate-600 mb-1">Nombre de la Empresa</label><input type="text" value={crmForm.company} onChange={e => setCrmForm({...crmForm, company: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">NIF Empresa</label><input type="text" value={crmForm.company_cif} onChange={e => setCrmForm({...crmForm, company_cif: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-3"><label className="block font-bold text-slate-600 mb-1">Dirección de la Empresa</label><input type="text" value={crmForm.company_address} onChange={e => setCrmForm({...crmForm, company_address: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Teléfono Empresa</label><input type="tel" value={crmForm.company_phone} onChange={e => setCrmForm({...crmForm, company_phone: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Contacto Administración</label><input type="text" placeholder="Ej. Marta" value={crmForm.admin_contact} onChange={e => setCrmForm({...crmForm, admin_contact: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Correo Administración</label><input type="email" value={crmForm.admin_email} onChange={e => setCrmForm({...crmForm, admin_email: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                    </div>
+                  </div>
+                </form>
+              )}
+              {crmTab === 'historial' && (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-3 gap-2 bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
+                    <div>
+                      <span className="text-[9px] uppercase font-bold text-slate-400 block">Total Presup.</span>
+                      <span className="font-black text-sm text-slate-800">{activeClientTotalPresupuestado.toFixed(2)} €</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] uppercase font-bold text-indigo-500 block">Total Facturado</span>
+                      <span className="font-black text-sm text-indigo-700">{activeClientTotalFacturado.toFixed(2)} €</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] uppercase font-bold text-rose-500 block">Pendiente Pago</span>
+                      <span className="font-black text-sm text-rose-600">{activeClientTotalPendiente.toFixed(2)} €</span>
+                    </div>
+                  </div>
+
+                  {activeClientBudgets.filter(b => b.type === 'presupuesto').length === 0 ? (
+                    <div className="text-center py-10 text-slate-500 font-bold bg-white rounded-xl border border-dashed border-slate-300">
+                      No hay proyectos ni presupuestos registrados para este cliente.
+                    </div>
+                  ) : (
+                    activeClientBudgets.filter(b => b.type === 'presupuesto').map(proj => {
+                      const relatedInvoices = activeClientBudgets.filter(f => f.type === 'factura' && f.parent_id === proj.id);
+                      const relatedOrder = workOrders.find(wo => wo.budget_id === proj.id);
+                      const relatedExpenses = relatedOrder ? allExpenses.filter(e => e.work_order_id === relatedOrder.id) : [];
+                      const relatedFiles = relatedOrder ? allAttachments.filter(a => a.work_order_id === relatedOrder.id) : [];
+
+                      return (
+                        <div key={proj.id} className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-sm">
+                          <div className="flex justify-between items-start border-b border-slate-100 pb-2">
+                            <div>
+                              <span className="text-[9px] font-bold uppercase bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">Proyecto</span>
+                              <h4 className="font-black text-slate-800 text-sm mt-1">{proj.code}</h4>
+                              {proj.work_order_ref && (
+                                <p className="text-xs font-bold text-indigo-600">Ref: {proj.work_order_ref}</p>
+                              )}
+                              <span className="text-[10px] text-slate-400 font-mono">{proj.created_at?.split('T')[0]}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="font-black text-slate-800 text-sm">{Number(proj.total).toFixed(2)} €</span>
+                              <div className="text-[10px] font-bold uppercase text-indigo-600">{proj.status}</div>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <button onClick={() => handleGeneratePdfAction(proj, 'download')} className="px-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded hover:bg-slate-100">⬇ Ver Presupuesto</button>
+                            <button onClick={() => handleDeleteDocument(proj)} className="px-2.5 py-1 bg-rose-50 border border-rose-200 text-rose-600 text-[10px] font-bold rounded hover:bg-rose-100">🗑 Eliminar Proyecto</button>
+                          </div>
+
+                          {relatedOrder && (
+                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-black text-slate-700">🏗️ Obra: {relatedOrder.work_order_ref || relatedOrder.status}</span>
+                                <span className="text-[10px] font-bold text-rose-600">Gastos: -{relatedExpenses.reduce((acc, e) => acc + Number(e.amount), 0).toFixed(2)} €</span>
+                              </div>
+
+                              {relatedFiles.length > 0 && (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                                  {relatedFiles.map(file => (
+                                    <div key={file.id} className="bg-white p-2 rounded border border-slate-200 text-[10px] flex flex-col justify-between group">
+                                      <a href={file.file_url} target="_blank" rel="noopener noreferrer" className="font-bold text-indigo-600 truncate hover:underline block mb-1">
+                                        📄 {file.file_name}
+                                      </a>
+                                      <button onClick={() => handleDeleteAttachment(file.id)} className="text-rose-500 hover:text-rose-700 font-bold text-[9px] text-right mt-1">🗑 Eliminar</button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {relatedInvoices.length > 0 && (
+                            <div className="space-y-1.5 pt-1">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Facturas Generadas</span>
+                              {relatedInvoices.map(inv => (
+                                <div key={inv.id} className="flex justify-between items-center bg-indigo-50/50 p-2.5 rounded-lg border border-indigo-100 text-xs">
+                                  <div>
+                                    <span className="font-black text-indigo-900">{inv.code}</span>
+                                    <span className="text-[10px] text-slate-500 ml-2">({inv.status === 'cobrada' ? 'Cobrada' : 'Pendiente'})</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-black text-slate-800">{Number(inv.total).toFixed(2)} €</span>
+                                    <button onClick={() => handleGeneratePdfAction(inv, 'download')} className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 text-[9px] font-bold rounded">⬇ PDF</button>
+                                    <button onClick={() => handleDeleteDocument(inv)} className="text-rose-500 hover:text-rose-700 font-bold text-xs">✕</button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+            {crmTab === 'datos' && (
+              <div className="p-4 bg-white border-t border-slate-200 flex gap-3 shrink-0">
+                <button type="button" onClick={() => setShowCrmModal(false)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg font-bold text-sm">Cancelar</button>
+                <button type="submit" form="crmFormId" className="flex-[2] py-3 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg font-black text-sm shadow-md">Guardar Ficha</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CREAR PARTIDA DE CATÁLOGO */}
+      {showCatalogItemModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4 animate-in zoom-in-95">
+            <h3 className="font-black text-base text-slate-800 border-b border-slate-100 pb-2">📦 Nueva Partida Catálogo</h3>
+            <form onSubmit={handleSaveCatalogItem} className="space-y-3 text-xs">
+              <div><label className="block font-bold text-slate-600 mb-1">Descripción</label><input type="text" required placeholder="Ej. Instalación..." value={newCatDesc} onChange={e => setNewCatDesc(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 font-bold focus:border-indigo-500 focus:outline-none transition" /></div>
+              <div>
+                <label className="block font-bold text-slate-600 mb-1">Precio Base</label>
+                <div className="relative"><input type="number" step="0.01" required placeholder="0.00" value={newCatPrice} onChange={e => setNewCatPrice(Number(e.target.value))} className="w-full p-2.5 rounded-lg border border-slate-300 font-black text-indigo-600 focus:border-indigo-500 focus:outline-none transition" /><span className="absolute right-3 top-2.5 font-black text-slate-400">€</span></div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={() => setShowCatalogItemModal(false)} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 transition rounded-lg font-bold text-slate-700">Cancelar</button>
+                <button type="submit" className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg font-bold shadow-md">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
