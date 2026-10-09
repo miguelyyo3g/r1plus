@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // ============================================================================
-// 1. MOTOR TETRIS CLÁSICO (100% Compatible con móviles antiguos)
+// 1. MOTOR TETRIS CLÁSICO
 // ============================================================================
 const BOARD_WIDTH = 10;
 const BOARD_HEIGHT = 20;
@@ -82,7 +82,6 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
     const finalBoard = [...newEmptyRows, ...filteredBoard];
 
     const newScore = currentScore + 10 + (linesCleared * 100);
-    
     setBoard(finalBoard);
     setScore(newScore);
     setPiece(null);
@@ -95,7 +94,6 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
     const timer = setInterval(() => {
       const { board, piece, pos, score } = stateRef.current;
       if (!piece) return;
-      
       if (!checkCollision(piece.shape, pos.x, pos.y + 1, board)) {
         setPos({ x: pos.x, y: pos.y + 1 });
       } else {
@@ -126,9 +124,7 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
         if (val !== 0) {
           const dy = pos.y + r;
           const dx = pos.x + c;
-          if (dy >= 0 && dy < BOARD_HEIGHT && dx >= 0 && dx < BOARD_WIDTH) {
-            displayBoard[dy][dx] = piece.color;
-          }
+          if (dy >= 0 && dy < BOARD_HEIGHT && dx >= 0 && dx < BOARD_WIDTH) displayBoard[dy][dx] = piece.color;
         }
       });
     });
@@ -145,69 +141,43 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
         <div className="text-amber-400 font-black text-xl w-14 text-right">{score}</div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center my-2 relative">
+      <div className="flex-1 flex items-center justify-center my-2 relative min-h-[350px]">
         <div className="bg-slate-950 p-1.5 rounded-lg border-4 border-slate-700 shadow-2xl relative">
-          
           {gameOver && (
             <div className="absolute inset-0 z-10 bg-slate-900/90 flex flex-col items-center justify-center backdrop-blur-sm rounded-md">
               <span className="text-rose-500 font-black text-3xl mb-4 drop-shadow-md">GAME OVER</span>
               <button onClick={() => { setBoard(createEmptyBoard()); setScore(0); setGameOver(false); setPiece(null); }} className="px-6 py-3 bg-white text-slate-900 rounded-xl font-black shadow-lg active:scale-95">Reintentar</button>
             </div>
           )}
-
-          {/* RENDERING SEGURO SIN FLATMAP */}
-          <div className="grid grid-rows-[repeat(20,minmax(0,1fr))] grid-cols-10 bg-slate-900 border-2 border-slate-800" style={{ width: '220px', height: '440px' }}>
+          <div className="grid grid-rows-[repeat(20,minmax(0,1fr))] grid-cols-10 bg-slate-900 border-2 border-slate-800" style={{ width: '200px', height: '400px' }}>
             {Array.from({ length: 200 }).map((_, i) => {
               const y = Math.floor(i / BOARD_WIDTH);
               const x = i % BOARD_WIDTH;
               const cell = displayBoard[y][x];
-              
-              if (!cell) {
-                return <div key={`${y}-${x}`} className="w-full h-full border-[0.5px] border-slate-800/50 bg-transparent" />;
-              }
-              return (
-                <div key={`${y}-${x}`} className={`w-full h-full ${cell} border-[3px] border-t-white/50 border-l-white/50 border-b-black/50 border-r-black/50`} />
-              );
+              if (!cell) return <div key={`${y}-${x}`} className="w-full h-full border-[0.5px] border-slate-800/50 bg-transparent" />;
+              return <div key={`${y}-${x}`} className={`w-full h-full ${cell} border-[3px] border-t-white/50 border-l-white/50 border-b-black/50 border-r-black/50`} />;
             })}
           </div>
         </div>
       </div>
 
-      <div className="w-full max-w-[300px] flex flex-col gap-4 shrink-0 pb-4">
-        <button 
-          onClick={rotatePiece} 
-          className="w-full py-5 bg-indigo-500 active:bg-indigo-600 rounded-2xl text-white font-black text-2xl shadow-[0_6px_0_rgb(67,56,202)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center gap-2"
-        >
-          <span className="text-3xl">↻</span> GIRAR
-        </button>
-        
-        <div className="flex justify-between w-full h-20 gap-3">
-          <button 
-            onClick={moveLeft} 
-            className="flex-1 bg-slate-700 active:bg-slate-800 rounded-2xl text-white font-black text-4xl shadow-[0_6px_0_rgb(51,65,85)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center"
-          >
-            ←
-          </button>
-          <button 
-            onClick={dropPiece} 
-            className="flex-1 bg-rose-500 active:bg-rose-600 rounded-2xl text-white font-black text-3xl shadow-[0_6px_0_rgb(225,29,72)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center"
-          >
-            ⏬
-          </button>
-          <button 
-            onClick={moveRight} 
-            className="flex-1 bg-slate-700 active:bg-slate-800 rounded-2xl text-white font-black text-4xl shadow-[0_6px_0_rgb(51,65,85)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center"
-          >
-            →
-          </button>
+      {/* MANDO TÁCTIL ESTILO CONSOLA (Separado y arriba del BottomNav) */}
+      <div className="w-full max-w-[340px] flex gap-3 shrink-0 pb-24">
+        <div className="flex gap-2 flex-1">
+          <button onClick={moveLeft} className="flex-1 bg-slate-700 active:bg-slate-800 rounded-2xl text-white font-black text-3xl shadow-[0_6px_0_rgb(51,65,85)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center p-4">←</button>
+          <button onClick={dropPiece} className="flex-1 bg-rose-500 active:bg-rose-600 rounded-2xl text-white font-black text-2xl shadow-[0_6px_0_rgb(225,29,72)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center p-4">⏬</button>
+          <button onClick={moveRight} className="flex-1 bg-slate-700 active:bg-slate-800 rounded-2xl text-white font-black text-3xl shadow-[0_6px_0_rgb(51,65,85)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center p-4">→</button>
         </div>
+        <button onClick={rotatePiece} className="w-[80px] bg-indigo-500 active:bg-indigo-600 rounded-2xl text-white font-black text-3xl shadow-[0_6px_0_rgb(67,56,202)] active:shadow-none active:translate-y-[6px] transition-all flex flex-col items-center justify-center p-2">
+          <span>↻</span>
+        </button>
       </div>
     </div>
   );
 }
 
 // ============================================================================
-// 2. MOTOR SUDOKU REAL (Botón comprobar Seguro)
+// 2. MOTOR SUDOKU REAL
 // ============================================================================
 const BASE_SUDOKU = [
   4,3,5, 2,6,9, 7,8,1,
@@ -236,12 +206,8 @@ function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => voi
     let hidden = 0;
     while (hidden < cellsToHide) {
       const rIdx = Math.floor(Math.random() * 81);
-      if (newInitial[rIdx] !== 0) {
-        newInitial[rIdx] = 0;
-        hidden++;
-      }
+      if (newInitial[rIdx] !== 0) { newInitial[rIdx] = 0; hidden++; }
     }
-    
     setSolvedBoard(newSolved);
     setInitialBoard([...newInitial]);
     setBoard([...newInitial]);
@@ -255,16 +221,9 @@ function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => voi
   };
 
   const handleCheck = () => {
-    if (board.some(c => c === 0)) {
-      alert('⚠️ Aún quedan casillas en blanco por rellenar.');
-      return;
-    }
+    if (board.some(c => c === 0)) { alert('⚠️ Aún quedan casillas en blanco por rellenar.'); return; }
     const isCorrect = board.every((cell, idx) => cell === solvedBoard[idx]);
-    if (isCorrect) {
-      onWin(level * 100);
-    } else {
-      alert('❌ Hay algún número incorrecto. ¡Revisa el tablero!');
-    }
+    if (isCorrect) { onWin(level * 100); } else { alert('❌ Hay algún número incorrecto. ¡Revisa el tablero!'); }
   };
 
   return (
@@ -281,21 +240,17 @@ function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => voi
       <div className="bg-white p-1 sm:p-2 rounded-xl shadow-lg border-2 border-slate-800 w-full max-w-[340px] shrink-0">
         <div className="grid grid-cols-9 bg-slate-800 gap-[1px]">
           {board.map((cell, i) => {
-            const row = Math.floor(i / 9);
-            const col = i % 9;
-            const isRightBorder = col === 2 || col === 5;
-            const isBottomBorder = row === 2 || row === 5;
+            const isRightBorder = (i % 9) === 2 || (i % 9) === 5;
+            const isBottomBorder = Math.floor(i / 9) === 2 || Math.floor(i / 9) === 5;
             const isInitial = initialBoard[i] !== 0;
             const isSelected = selectedCell === i;
             
             return (
               <div 
-                key={i} 
-                onClick={() => { if (!isInitial) setSelectedCell(i); }}
+                key={i} onClick={() => { if (!isInitial) setSelectedCell(i); }}
                 className={`
                   aspect-square flex items-center justify-center text-xl sm:text-2xl font-black cursor-pointer select-none transition-all
-                  ${isRightBorder ? 'border-r-2 border-r-slate-800' : ''} 
-                  ${isBottomBorder ? 'border-b-2 border-b-slate-800' : ''}
+                  ${isRightBorder ? 'border-r-2 border-r-slate-800' : ''} ${isBottomBorder ? 'border-b-2 border-b-slate-800' : ''}
                   ${isSelected ? 'bg-indigo-500 text-white shadow-inner scale-95' : 'bg-white'}
                   ${isInitial ? 'text-slate-800 bg-slate-100' : (!isSelected ? 'text-indigo-600' : '')}
                   ${!isInitial && !isSelected ? 'hover:bg-indigo-50' : ''}
@@ -310,29 +265,222 @@ function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => voi
       
       <div className="grid grid-cols-5 gap-2 mt-4 w-full max-w-[340px] shrink-0">
         {[1,2,3,4,5,6,7,8,9].map(num => (
-          <button 
-            key={num} 
-            onClick={() => handleInput(num)}
-            className="bg-white border border-slate-200 shadow-[0_4px_0_rgb(203,213,225)] rounded-xl py-4 text-2xl font-black text-slate-700 active:shadow-none active:translate-y-[4px] active:bg-indigo-50 active:text-indigo-700 transition-all"
-          >
-            {num}
-          </button>
+          <button key={num} onClick={() => handleInput(num)} className="bg-white border border-slate-200 shadow-[0_4px_0_rgb(203,213,225)] rounded-xl py-4 text-2xl font-black text-slate-700 active:shadow-none active:translate-y-[4px] active:bg-indigo-50 active:text-indigo-700 transition-all">{num}</button>
         ))}
-        <button 
-          onClick={() => handleInput(0)}
-          className="bg-slate-200 border border-slate-300 shadow-[0_4px_0_rgb(148,163,184)] rounded-xl py-4 text-sm font-bold text-slate-700 active:shadow-none active:translate-y-[4px] active:bg-slate-300 transition-all flex items-center justify-center"
-        >
-          Borrar
-        </button>
+        <button onClick={() => handleInput(0)} className="bg-slate-200 border border-slate-300 shadow-[0_4px_0_rgb(148,163,184)] rounded-xl py-4 text-sm font-bold text-slate-700 active:shadow-none active:translate-y-[4px] active:bg-slate-300 transition-all flex items-center justify-center">Borrar</button>
       </div>
 
-      <div className="w-full max-w-[340px] mt-6 pb-6 shrink-0">
-        <button 
-          onClick={handleCheck}
-          className="w-full py-4 bg-emerald-500 active:bg-emerald-600 text-white rounded-2xl font-black text-xl shadow-[0_6px_0_rgb(5,150,105)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center gap-2"
-        >
-          ✓ COMPROBAR SUDOKU
+      <div className="w-full max-w-[340px] mt-6 pb-24 shrink-0">
+        <button onClick={handleCheck} className="w-full py-4 bg-emerald-500 active:bg-emerald-600 text-white rounded-2xl font-black text-xl shadow-[0_6px_0_rgb(5,150,105)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center gap-2">✓ COMPROBAR SUDOKU</button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 3. MOTOR SOPA DE LETRAS
+// ============================================================================
+function WordSearchGame({ level, onBack, onWin }: { level: number, onBack: () => void, onWin: (score: number) => void }) {
+  const ALL_WORDS = ['VENTA', 'OFERTA', 'CLIENTE', 'APP', 'RUTAS', 'GANAR', 'EXITO', 'DATOS', 'FACTURA', 'COBRO'];
+  const [board, setBoard] = useState<string[]>(Array(64).fill(''));
+  const [targetWords, setTargetWords] = useState<string[]>([]);
+  const [foundWords, setFoundWords] = useState<string[]>([]);
+  const [selectedCells, setSelectedCells] = useState<number[]>([]);
+
+  useEffect(() => {
+    // Escoger palabras según nivel (Mín 2, Máx 5)
+    const numWords = Math.min(5, 1 + Math.ceil(level / 10));
+    const wordsToFind = [...ALL_WORDS].sort(() => Math.random() - 0.5).slice(0, numWords);
+    setTargetWords(wordsToFind);
+
+    const newBoard = Array(64).fill('');
+    // Insertar palabras de forma simple (horizontal)
+    wordsToFind.forEach(word => {
+      let placed = false;
+      while (!placed) {
+        const row = Math.floor(Math.random() * 8);
+        const col = Math.floor(Math.random() * (8 - word.length));
+        const idx = row * 8 + col;
+        // Comprobar si cabe
+        let canPlace = true;
+        for (let i = 0; i < word.length; i++) {
+          if (newBoard[idx + i] !== '' && newBoard[idx + i] !== word[i]) { canPlace = false; break; }
+        }
+        if (canPlace) {
+          for (let i = 0; i < word.length; i++) newBoard[idx + i] = word[i];
+          placed = true;
+        }
+      }
+    });
+
+    // Rellenar resto
+    const chars = 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ';
+    for (let i = 0; i < 64; i++) {
+      if (newBoard[i] === '') newBoard[i] = chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setBoard(newBoard);
+    setFoundWords([]);
+    setSelectedCells([]);
+  }, [level]);
+
+  const toggleCell = (i: number) => {
+    let newSelected = [...selectedCells];
+    if (newSelected.includes(i)) {
+      newSelected = newSelected.filter(c => c !== i);
+    } else {
+      newSelected.push(i);
+    }
+    setSelectedCells(newSelected);
+
+    // Comprobar si forma alguna palabra
+    const wordFormed = newSelected.map(idx => board[idx]).join('');
+    const wordFormedRev = wordFormed.split('').reverse().join('');
+    
+    let matchedWord = null;
+    if (targetWords.includes(wordFormed) && !foundWords.includes(wordFormed)) matchedWord = wordFormed;
+    if (targetWords.includes(wordFormedRev) && !foundWords.includes(wordFormedRev)) matchedWord = wordFormedRev;
+
+    if (matchedWord) {
+      const newFound = [...foundWords, matchedWord];
+      setFoundWords(newFound);
+      setSelectedCells([]); // Resetear selección al encontrar una
+      if (newFound.length === targetWords.length) {
+        setTimeout(() => onWin(level * 50), 500);
+      }
+    } else if (newSelected.length >= 8) {
+      setSelectedCells([]); // Limpiar si selecciona muchas a lo loco
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-start w-full h-full bg-emerald-50 rounded-2xl p-4 relative animate-in fade-in overflow-y-auto">
+      <div className="flex justify-between items-center w-full mb-4 shrink-0">
+        <button onClick={onBack} className="w-10 h-10 bg-emerald-200 text-emerald-800 rounded-full font-black hover:bg-emerald-300 transition">←</button>
+        <div className="text-center">
+          <div className="text-emerald-900 font-black text-xl">SOPA LETRAS</div>
+          <div className="text-xs text-emerald-600 font-bold uppercase tracking-widest">Nivel {level}</div>
+        </div>
+        <button onClick={() => onWin(level * 100)} className="px-2 py-1 bg-emerald-200 text-emerald-800 rounded-md text-[10px] font-bold border border-emerald-400">Ganar</button>
+      </div>
+
+      {/* Lista de Palabras */}
+      <div className="flex flex-wrap justify-center gap-2 mb-4">
+        {targetWords.map(word => (
+          <span key={word} className={`px-3 py-1 rounded-full text-xs font-black tracking-widest transition-all duration-500 ${foundWords.includes(word) ? 'bg-emerald-500 text-white line-through scale-90' : 'bg-white text-slate-700 border border-slate-200'}`}>
+            {word}
+          </span>
+        ))}
+      </div>
+
+      {/* Tablero Sopa */}
+      <div className="bg-white p-2 rounded-xl shadow-lg border-2 border-emerald-800 w-full max-w-[340px] shrink-0 mb-4">
+        <div className="grid grid-cols-8 gap-1 bg-emerald-50 p-1 rounded-lg">
+          {board.map((char, i) => {
+            const isSelected = selectedCells.includes(i);
+            return (
+              <div 
+                key={i} 
+                onClick={() => toggleCell(i)}
+                className={`
+                  aspect-square flex items-center justify-center text-lg sm:text-xl font-black cursor-pointer select-none rounded-md transition-all
+                  ${isSelected ? 'bg-emerald-500 text-white shadow-inner scale-95' : 'bg-white text-slate-800 shadow-sm border border-emerald-100 hover:bg-emerald-100'}
+                `}
+              >
+                {char}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      
+      <div className="w-full max-w-[340px] pb-24 shrink-0">
+        <button onClick={() => setSelectedCells([])} className="w-full py-4 bg-slate-200 active:bg-slate-300 text-slate-700 rounded-2xl font-black text-sm shadow-[0_4px_0_rgb(148,163,184)] active:shadow-none active:translate-y-[4px] transition-all">
+          Limpiar Selección
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 4. MOTOR CANDY MATCH (Candicas)
+// ============================================================================
+const CANDIES = ['🍎', '🍋', '🍇', '🫐', '🍊'];
+const GRID_SIZE = 6;
+
+function CandyGame({ level, onBack, onWin }: { level: number, onBack: () => void, onWin: (score: number) => void }) {
+  const [board, setBoard] = useState<string[]>([]);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [score, setScore] = useState(0);
+  const targetScore = level * 200;
+
+  // Llenar tablero aleatorio sin combos iniciales (simplificado)
+  useEffect(() => {
+    const initial = Array.from({length: GRID_SIZE * GRID_SIZE}, () => CANDIES[Math.floor(Math.random() * CANDIES.length)]);
+    setBoard(initial);
+  }, []);
+
+  const handleCellClick = (idx: number) => {
+    if (selected === null) {
+      setSelected(idx);
+    } else {
+      // Intentar intercambio si son adyacentes
+      const isAdj = (idx === selected - 1 && idx % GRID_SIZE !== GRID_SIZE - 1) || 
+                    (idx === selected + 1 && idx % GRID_SIZE !== 0) || 
+                    idx === selected - GRID_SIZE || 
+                    idx === selected + GRID_SIZE;
+      
+      if (isAdj) {
+        const newBoard = [...board];
+        const temp = newBoard[idx];
+        newBoard[idx] = newBoard[selected];
+        newBoard[selected] = temp;
+        
+        // MVP: En este Candy básico, damos puntos por cada movimiento, en la V2 se calculan lineas.
+        const points = 50;
+        setScore(s => {
+          const newS = s + points;
+          if (newS >= targetScore) setTimeout(() => onWin(newS), 300);
+          return newS;
+        });
+        
+        // Rellenar de nuevo (Simulación de romper y caer)
+        newBoard[idx] = CANDIES[Math.floor(Math.random() * CANDIES.length)];
+        newBoard[selected] = CANDIES[Math.floor(Math.random() * CANDIES.length)];
+        setBoard(newBoard);
+      }
+      setSelected(null);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-start w-full h-full bg-rose-50 rounded-2xl p-4 relative animate-in fade-in overflow-y-auto">
+      <div className="flex justify-between items-center w-full mb-4 shrink-0">
+        <button onClick={onBack} className="w-10 h-10 bg-rose-200 text-rose-800 rounded-full font-black hover:bg-rose-300 transition">←</button>
+        <div className="text-center">
+          <div className="text-rose-900 font-black text-xl">CANDY MATCH</div>
+          <div className="text-xs text-rose-600 font-bold uppercase tracking-widest">Nivel {level}</div>
+        </div>
+        <div className="text-rose-600 font-black text-xl">{score} / {targetScore}</div>
+      </div>
+
+      <p className="text-xs text-rose-500 font-bold mb-4 text-center">Intercambia frutas adyacentes para ganar puntos.</p>
+
+      <div className="bg-white p-2 rounded-2xl shadow-xl border-4 border-rose-200 w-full max-w-[340px] shrink-0 mb-24">
+        <div className="grid grid-cols-6 gap-1 bg-rose-50 p-2 rounded-xl">
+          {board.map((candy, i) => (
+            <div 
+              key={i} 
+              onClick={() => handleCellClick(i)}
+              className={`
+                aspect-square flex items-center justify-center text-3xl sm:text-4xl cursor-pointer select-none rounded-xl transition-all duration-300
+                ${selected === i ? 'bg-rose-200 scale-110 shadow-lg ring-4 ring-rose-400 z-10' : 'bg-white shadow-sm border border-rose-100 hover:scale-105 hover:shadow-md'}
+              `}
+            >
+              {candy}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -349,18 +497,14 @@ export default function GamesView() {
   const [progress, setProgress] = useState({ sudoku: 1, sopa: 1, tetris: 1, candy: 1 });
   const [winModal, setWinModal] = useState<{ show: boolean, gameId: string, level: number, coins: number } | null>(null);
 
-  // Blindaje para evitar que LocalStorage rompa la app
   useEffect(() => {
     try {
       const savedProgress = localStorage.getItem('r1plus_games_progress');
       if (savedProgress) {
         const parsed = JSON.parse(savedProgress);
-        if (parsed && typeof parsed === 'object') {
-          setProgress(prev => ({...prev, ...parsed}));
-        }
+        if (parsed && typeof parsed === 'object') setProgress(prev => ({...prev, ...parsed}));
       }
-    } catch(e) { console.warn("Error leyendo progreso de juegos"); }
-    
+    } catch(e) {}
     try {
       const savedCoins = localStorage.getItem('r1plus_coins');
       if (savedCoins) setCoins(parseInt(savedCoins, 10) || 0);
@@ -369,9 +513,9 @@ export default function GamesView() {
 
   const games = [
     { id: 'sudoku', name: 'Sudoku Pro', icon: '🔢', color: 'bg-blue-500', hover: 'hover:bg-blue-600', desc: 'Entrena tu lógica', totalLevels: 100 },
-    { id: 'tetris', name: 'Tetris Clásico', icon: '🧱', color: 'bg-indigo-500', hover: 'hover:bg-indigo-600', desc: 'Encaja las piezas', totalLevels: 100 },
-    { id: 'sopa', name: 'Sopa Letras', icon: '🔠', color: 'bg-emerald-500', hover: 'hover:bg-emerald-600', desc: 'Próximamente', totalLevels: 100 },
-    { id: 'candy', name: 'Candy Match', icon: '🍬', color: 'bg-rose-500', hover: 'hover:bg-rose-600', desc: 'Próximamente', totalLevels: 100 },
+    { id: 'tetris', name: 'Tetris Arcade', icon: '🧱', color: 'bg-indigo-500', hover: 'hover:bg-indigo-600', desc: 'Encaja las piezas', totalLevels: 100 },
+    { id: 'sopa', name: 'Sopa Letras', icon: '🔠', color: 'bg-emerald-500', hover: 'hover:bg-emerald-600', desc: 'Encuentra la palabra', totalLevels: 100 },
+    { id: 'candy', name: 'Candy Match', icon: '🍬', color: 'bg-rose-500', hover: 'hover:bg-rose-600', desc: 'Une las frutas', totalLevels: 100 },
   ];
 
   const handleWinLevel = (score: number) => {
@@ -399,15 +543,8 @@ export default function GamesView() {
   if (selectedLevel !== null && activeGame) {
     if (activeGame === 'tetris') return <TetrisGame level={selectedLevel} onBack={() => setSelectedLevel(null)} onWin={handleWinLevel} />;
     if (activeGame === 'sudoku') return <SudokuGame level={selectedLevel} onBack={() => setSelectedLevel(null)} onWin={handleWinLevel} />;
-    
-    return (
-      <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6 text-center rounded-2xl border border-slate-200">
-        <span className="text-6xl mb-4">🚧</span>
-        <h2 className="text-2xl font-black text-slate-800 mb-2">Juego en Desarrollo</h2>
-        <p className="text-slate-500 font-medium mb-6 max-w-sm">Estamos programando la lógica para el nivel {selectedLevel} de {games.find(g => g.id === activeGame)?.name}. ¡Estará listo en la próxima actualización!</p>
-        <button onClick={() => setSelectedLevel(null)} className="px-6 py-3 bg-slate-200 text-slate-700 rounded-xl font-bold transition">Volver</button>
-      </div>
-    );
+    if (activeGame === 'sopa') return <WordSearchGame level={selectedLevel} onBack={() => setSelectedLevel(null)} onWin={handleWinLevel} />;
+    if (activeGame === 'candy') return <CandyGame level={selectedLevel} onBack={() => setSelectedLevel(null)} onWin={handleWinLevel} />;
   }
 
   if (activeGame) {
@@ -417,7 +554,7 @@ export default function GamesView() {
     return (
       <div className="h-full flex flex-col bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm animate-in slide-in-from-right-4">
         {winModal && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/90 p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-900/90 p-4 backdrop-blur-sm animate-in fade-in">
             <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl animate-in zoom-in-95">
               <div className="text-7xl mb-4 animate-bounce">🏆</div>
               <h2 className="text-3xl font-black text-slate-800 mb-1">¡Nivel Superado!</h2>
@@ -443,7 +580,7 @@ export default function GamesView() {
           <div className="bg-black/20 px-3 py-1.5 rounded-lg text-sm font-black flex items-center gap-1.5 relative z-10">{coins} 🪙</div>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50 pb-24">
           <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-10 gap-2 sm:gap-3">
             {Array.from({ length: game?.totalLevels || 100 }).map((_, i) => {
               const level = i + 1;
@@ -487,7 +624,7 @@ export default function GamesView() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-4">
+      <div className="flex-1 overflow-y-auto pb-24">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 h-full max-h-[600px]">
           {games.map(game => {
             const currentLevel = progress[game.id as keyof typeof progress] || 1;
