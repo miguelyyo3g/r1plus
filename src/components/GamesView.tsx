@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // ============================================================================
-// 1. MOTOR TETRIS REAL
+// 1. MOTOR TETRIS REAL (Controles Clásicos Mejorados)
 // ============================================================================
 const BOARD_WIDTH = 10;
 const BOARD_HEIGHT = 20;
@@ -28,7 +28,7 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [score, setScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
-  const targetScore = level * 150; // Meta: Nivel 1 = 150pts, Nivel 10 = 1500pts
+  const targetScore = level * 150; 
 
   const spawnPiece = useCallback(() => {
     const tetrominos = 'IJLOSTZ';
@@ -39,7 +39,6 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
 
   useEffect(() => { if (!piece && !gameOver) spawnPiece(); }, [piece, gameOver, spawnPiece]);
 
-  // Detector de colisiones reales
   const checkCollision = (shape: any[][], x: number, y: number, currentBoard: any[][]) => {
     for (let r = 0; r < shape.length; r++) {
       for (let c = 0; c < shape[r].length; c++) {
@@ -63,7 +62,7 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
     for (let r = 0; r < piece.shape.length; r++) {
       for (let c = 0; c < piece.shape[r].length; c++) {
         if (piece.shape[r][c] !== 0) {
-          if (pos.y + r < 0) { gameIsOver = true; } // Tocó el techo
+          if (pos.y + r < 0) { gameIsOver = true; } 
           else { newBoard[pos.y + r][pos.x + c] = piece.color; }
         }
       }
@@ -74,7 +73,6 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
       return;
     }
 
-    // Borrar líneas completas
     let linesCleared = 0;
     const filteredBoard = newBoard.filter(row => row.some(cell => cell === null));
     linesCleared = BOARD_HEIGHT - filteredBoard.length;
@@ -83,7 +81,6 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
 
     setBoard(finalBoard);
     
-    // Puntuación: 10pts por pieza + 100pts por línea
     const newScore = score + 10 + (linesCleared * 100);
     setScore(newScore);
     setPiece(null);
@@ -101,7 +98,6 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
     }
   }, [piece, pos, board, gameOver, lockPiece]);
 
-  // Controles
   const moveLeft = () => { if (piece && !gameOver && !checkCollision(piece.shape, pos.x - 1, pos.y, board)) setPos(p => ({...p, x: p.x - 1})); };
   const moveRight = () => { if (piece && !gameOver && !checkCollision(piece.shape, pos.x + 1, pos.y, board)) setPos(p => ({...p, x: p.x + 1})); };
   const rotatePiece = () => {
@@ -123,57 +119,81 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
   }, [moveDown, level]);
 
   return (
-    <div className="flex flex-col items-center justify-between w-full h-full bg-slate-900 rounded-2xl p-4 relative overflow-hidden animate-in fade-in">
-      {/* Cabecera Info */}
-      <div className="flex justify-between w-full">
+    <div className="flex flex-col items-center justify-between w-full h-full bg-slate-900 rounded-2xl p-4 sm:p-6 relative overflow-hidden animate-in fade-in">
+      
+      {/* CABECERA */}
+      <div className="flex justify-between w-full shrink-0">
         <button onClick={onBack} className="w-10 h-10 bg-slate-800 text-white rounded-full font-black hover:bg-rose-500 transition shrink-0">←</button>
         <div className="text-center">
-          <div className="text-white font-black text-lg">TETRIS LVL {level}</div>
-          <div className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Meta: {targetScore}</div>
+          <div className="text-white font-black text-lg sm:text-xl">TETRIS LVL {level}</div>
+          <div className="text-[10px] sm:text-xs text-slate-400 font-bold uppercase tracking-widest">Meta: {targetScore}</div>
         </div>
-        <div className="text-amber-400 font-black text-xl w-10 text-right">{score}</div>
+        <div className="text-amber-400 font-black text-xl sm:text-2xl w-14 text-right">{score}</div>
       </div>
 
-      {/* Tablero de Juego Real */}
-      <div className="bg-slate-950 p-2 rounded-lg border-4 border-slate-700 shadow-2xl relative mt-4">
-        {/* Barra progreso vertical */}
-        <div className="absolute -right-5 bottom-0 w-1.5 bg-slate-800 rounded-full h-full border border-slate-700 overflow-hidden">
-          <div className="bg-amber-400 w-full absolute bottom-0 transition-all duration-300" style={{ height: `${Math.min(100, (score/targetScore)*100)}%` }}></div>
-        </div>
-        
-        {gameOver && (
-          <div className="absolute inset-0 z-10 bg-slate-900/80 flex flex-col items-center justify-center backdrop-blur-sm">
-            <span className="text-white font-black text-2xl mb-4">GAME OVER</span>
-            <button onClick={() => { setBoard(createEmptyBoard()); setScore(0); setGameOver(false); setPiece(null); }} className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold">Reintentar</button>
+      {/* TABLERO */}
+      <div className="flex-1 flex items-center justify-center my-4 min-h-[300px]">
+        <div className="bg-slate-950 p-2 rounded-lg border-4 border-slate-700 shadow-2xl relative">
+          <div className="absolute -right-5 sm:-right-6 bottom-0 w-2 bg-slate-800 rounded-full h-full border border-slate-700 overflow-hidden">
+            <div className="bg-amber-400 w-full absolute bottom-0 transition-all duration-300" style={{ height: `${Math.min(100, (score/targetScore)*100)}%` }}></div>
           </div>
-        )}
+          
+          {gameOver && (
+            <div className="absolute inset-0 z-10 bg-slate-900/90 flex flex-col items-center justify-center backdrop-blur-sm rounded-md">
+              <span className="text-white font-black text-2xl mb-4">GAME OVER</span>
+              <button onClick={() => { setBoard(createEmptyBoard()); setScore(0); setGameOver(false); setPiece(null); }} className="px-6 py-3 bg-indigo-600 active:bg-indigo-700 text-white rounded-xl font-bold shadow-[0_4px_0_rgb(67,56,202)] active:shadow-none active:translate-y-[4px]">Reintentar</button>
+            </div>
+          )}
 
-        <div className="grid grid-rows-[repeat(20,minmax(0,1fr))] gap-[1px] bg-slate-800" style={{ width: '200px', height: '400px' }}>
-          {board.map((row, y) => row.map((cell, x) => {
-            let color = cell ? cell : 'bg-slate-900';
-            if (piece && y >= pos.y && y < pos.y + piece.shape.length && x >= pos.x && x < pos.x + piece.shape[0].length) {
-              if (piece.shape[y - pos.y][x - pos.x] !== 0) { color = piece.color; }
-            }
-            return <div key={`${y}-${x}`} className={`w-full h-full ${color} rounded-[1px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]`} />;
-          }))}
+          <div className="grid grid-rows-[repeat(20,minmax(0,1fr))] gap-[1px] bg-slate-800" style={{ width: '200px', height: '400px' }}>
+            {board.map((row, y) => row.map((cell, x) => {
+              let color = cell ? cell : 'bg-slate-900';
+              if (piece && y >= pos.y && y < pos.y + piece.shape.length && x >= pos.x && x < pos.x + piece.shape[0].length) {
+                if (piece.shape[y - pos.y][x - pos.x] !== 0) { color = piece.color; }
+              }
+              return <div key={`${y}-${x}`} className={`w-full h-full ${color} rounded-[1px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]`} />;
+            }))}
+          </div>
         </div>
       </div>
 
-      {/* Mando Táctil */}
-      <div className="w-full max-w-[280px] grid grid-cols-3 gap-2 mt-4 pb-2">
-        <button onClick={rotatePiece} className="col-span-3 bg-slate-700 active:bg-slate-600 text-white p-3 rounded-xl font-bold text-xl shadow-lg mb-2">↻ Girar</button>
-        <button onClick={moveLeft} className="bg-slate-700 active:bg-slate-600 text-white p-4 rounded-xl font-bold text-2xl shadow-lg">←</button>
-        <button onClick={dropPiece} className="bg-rose-600 active:bg-rose-500 text-white p-4 rounded-xl font-bold text-2xl shadow-lg">⏬</button>
-        <button onClick={moveRight} className="bg-slate-700 active:bg-slate-600 text-white p-4 rounded-xl font-bold text-2xl shadow-lg">→</button>
+      {/* MANDO TÁCTIL ESTILO CONSOLA (Mejorado) */}
+      <div className="w-full max-w-[320px] flex flex-col gap-3 shrink-0 pb-2">
+        <button 
+          onClick={rotatePiece} 
+          className="w-full py-4 bg-indigo-500 active:bg-indigo-600 rounded-2xl text-white font-black text-xl shadow-[0_6px_0_rgb(67,56,202)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center gap-2"
+        >
+          <span className="text-2xl">↻</span> GIRAR
+        </button>
+        
+        <div className="flex gap-3 w-full h-20">
+          <button 
+            onClick={moveLeft} 
+            className="flex-1 bg-slate-700 active:bg-slate-800 rounded-2xl text-white font-black text-4xl shadow-[0_6px_0_rgb(51,65,85)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center"
+          >
+            ←
+          </button>
+          <button 
+            onClick={dropPiece} 
+            className="flex-1 bg-rose-500 active:bg-rose-600 rounded-2xl text-white font-black text-3xl shadow-[0_6px_0_rgb(225,29,72)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center"
+          >
+            ⏬
+          </button>
+          <button 
+            onClick={moveRight} 
+            className="flex-1 bg-slate-700 active:bg-slate-800 rounded-2xl text-white font-black text-4xl shadow-[0_6px_0_rgb(51,65,85)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center"
+          >
+            →
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
 // ============================================================================
-// 2. MOTOR SUDOKU REAL
+// 2. MOTOR SUDOKU REAL (Con botón de comprobar)
 // ============================================================================
-// Un sudoku base válido resuelto.
 const BASE_SUDOKU = [
   4,3,5, 2,6,9, 7,8,1,
   6,8,2, 5,7,1, 4,9,3,
@@ -192,17 +212,12 @@ function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => voi
   const [solvedBoard, setSolvedBoard] = useState<number[]>([]);
   const [selectedCell, setSelectedCell] = useState<number | null>(null);
   
-  // Generar tablero en base al nivel
   useEffect(() => {
-    // Para que no sea siempre el mismo, barajamos la asignación de números (1->5, 2->9, etc)
     const nums = [1,2,3,4,5,6,7,8,9].sort(() => Math.random() - 0.5);
     const newSolved = BASE_SUDOKU.map(n => nums[n - 1]);
-    
-    // Dificultad: Nivel 1 quita 20 números, Nivel 100 quita 60 números
     const cellsToHide = Math.min(60, 20 + Math.floor(level * 0.4));
     const newInitial = [...newSolved];
     
-    // Quitar números aleatoriamente
     let hidden = 0;
     while (hidden < cellsToHide) {
       const rIdx = Math.floor(Math.random() * 81);
@@ -217,22 +232,31 @@ function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => voi
     setBoard([...newInitial]);
   }, [level]);
 
-  // Pulsar un número en el teclado
   const handleInput = (num: number) => {
     if (selectedCell === null || initialBoard[selectedCell] !== 0) return;
     const newBoard = [...board];
     newBoard[selectedCell] = num;
     setBoard(newBoard);
+  };
+
+  // NUEVO: Función de comprobar manual
+  const handleCheck = () => {
+    if (board.includes(0)) {
+      alert('⚠️ Aún quedan casillas en blanco por rellenar.');
+      return;
+    }
     
-    // Comprobar si hemos ganado
-    if (newBoard.every((cell, idx) => cell === solvedBoard[idx])) {
+    const isCorrect = board.every((cell, idx) => cell === solvedBoard[idx]);
+    if (isCorrect) {
       onWin(level * 100);
+    } else {
+      alert('❌ Hay algún número incorrecto. ¡Revisa el tablero!');
     }
   };
 
   return (
-    <div className="flex flex-col items-center justify-start w-full h-full bg-slate-50 rounded-2xl p-4 relative animate-in fade-in">
-      <div className="flex justify-between items-center w-full mb-4">
+    <div className="flex flex-col items-center justify-start w-full h-full bg-slate-50 rounded-2xl p-4 relative animate-in fade-in overflow-y-auto">
+      <div className="flex justify-between items-center w-full mb-4 shrink-0">
         <button onClick={onBack} className="w-10 h-10 bg-slate-200 text-slate-700 rounded-full font-black hover:bg-slate-300 transition">←</button>
         <div className="text-center">
           <div className="text-slate-800 font-black text-xl">SUDOKU</div>
@@ -242,7 +266,7 @@ function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => voi
       </div>
 
       {/* Tablero Jugable */}
-      <div className="bg-white p-2 rounded-xl shadow-lg border-2 border-slate-800 w-full max-w-[320px]">
+      <div className="bg-white p-2 rounded-xl shadow-lg border-2 border-slate-800 w-full max-w-[340px] shrink-0">
         <div className="grid grid-cols-9 bg-slate-800 gap-[1px]">
           {board.map((cell, i) => {
             const row = Math.floor(i / 9);
@@ -273,23 +297,34 @@ function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => voi
       </div>
       
       {/* Teclado Numérico */}
-      <div className="grid grid-cols-5 gap-2 mt-6 w-full max-w-[320px]">
+      <div className="grid grid-cols-5 gap-2 mt-4 w-full max-w-[340px] shrink-0">
         {[1,2,3,4,5,6,7,8,9].map(num => (
           <button 
             key={num} 
             onClick={() => handleInput(num)}
-            className="bg-white border border-slate-200 shadow-sm rounded-xl py-3 text-xl font-black text-slate-700 active:bg-indigo-100 active:text-indigo-700 active:scale-95 transition"
+            className="bg-white border border-slate-200 shadow-[0_3px_0_rgb(203,213,225)] rounded-xl py-3 sm:py-4 text-xl font-black text-slate-700 active:shadow-none active:translate-y-[3px] active:bg-indigo-50 active:text-indigo-700 transition-all"
           >
             {num}
           </button>
         ))}
         <button 
           onClick={() => handleInput(0)}
-          className="bg-slate-200 border border-slate-300 shadow-sm rounded-xl py-3 text-sm font-bold text-slate-700 active:bg-slate-300 active:scale-95 transition flex items-center justify-center"
+          className="bg-slate-200 border border-slate-300 shadow-[0_3px_0_rgb(148,163,184)] rounded-xl py-3 sm:py-4 text-sm font-bold text-slate-700 active:shadow-none active:translate-y-[3px] active:bg-slate-300 transition-all flex items-center justify-center"
         >
           Borrar
         </button>
       </div>
+
+      {/* NUEVO: Botón de Comprobar y Ganar */}
+      <div className="w-full max-w-[340px] mt-6 pb-6 shrink-0">
+        <button 
+          onClick={handleCheck}
+          className="w-full py-4 bg-emerald-500 active:bg-emerald-600 text-white rounded-2xl font-black text-xl shadow-[0_6px_0_rgb(5,150,105)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center gap-2"
+        >
+          ✓ COMPROBAR SUDOKU
+        </button>
+      </div>
+
     </div>
   );
 }
@@ -354,7 +389,6 @@ export default function GamesView() {
     if (activeGame === 'tetris') return <TetrisGame level={selectedLevel} onBack={() => setSelectedLevel(null)} onWin={handleWinLevel} />;
     if (activeGame === 'sudoku') return <SudokuGame level={selectedLevel} onBack={() => setSelectedLevel(null)} onWin={handleWinLevel} />;
     
-    // Juegos en desarrollo (Sopa y Candy)
     return (
       <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6 text-center rounded-2xl border border-slate-200">
         <span className="text-6xl mb-4">🚧</span>
