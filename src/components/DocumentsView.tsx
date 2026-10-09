@@ -48,6 +48,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [bPhone, setBPhone] = useState('');
   const [bItems, setBItems] = useState<Array<{ desc: string; qty: number; price: number }>>([{ desc: '', qty: 1, price: 0 }]);
 
+  // IA SCANNER DE PARTES
+  const [isScanning, setIsScanning] = useState(false);
+
   const [filteredSuggestions, setFilteredSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
@@ -165,6 +168,57 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const handleOpenAddBudget = () => {
     setBCode(generateNextBudgetCode());
     setShowAddBudgetModal(true);
+  };
+
+  // =========================================================================
+  // FUNCIÓN: ESCANEAR PARTE A MANO CON IA (OCR Inteligente)
+  // =========================================================================
+  const handleScanWorkOrder = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsScanning(true);
+    try {
+      // 1. Convertimos la imagen a Base64
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
+        const base64Image = reader.result;
+
+        // 2. Enviamos la imagen a nuestro propio backend para que la lea la IA
+        const response = await fetch('/api/scan-work-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64Image })
+        });
+
+        if (!response.ok) throw new Error('Error al procesar la imagen. Revisa el backend.');
+
+        const data = await response.json();
+
+        // 3. Rellenamos el formulario automáticamente
+        if (data.client_name) setBClient(data.client_name);
+        if (data.client_address) setBAddress(data.client_address);
+        if (data.client_phone) setBPhone(data.client_phone);
+        if (data.work_order_ref) setBWorkOrderRef(data.work_order_ref);
+        
+        if (data.items && data.items.length > 0) {
+          const parsedItems = data.items.map((i: any) => ({
+            desc: i.description || '',
+            qty: Number(i.quantity) || 1,
+            price: Number(i.price) || 0
+          }));
+          setBItems(parsedItems);
+        }
+
+        alert('✅ ¡Datos extraídos por IA! Por favor, revisa que todo esté correcto.');
+      };
+    } catch (err: any) {
+      alert('Error escaneando el parte: ' + err.message);
+    } finally {
+      setIsScanning(false);
+      e.target.value = ''; // Limpiamos el input file
+    }
   };
 
   const handleAcceptBudget = async (budget: any) => {
@@ -329,7 +383,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     if (docPressTimer.current) clearTimeout(docPressTimer.current);
   };
 
-  // --- REGLAS ESTRICTAS DE BORRADO DE PRESUPUESTO ---
   const handleDeleteDocument = async (b: any) => {
     if (b.type === 'factura') {
       const integrity = checkSequentialIntegrity(b.code);
@@ -338,14 +391,12 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         return;
       }
     } else {
-      // 1. Comprobar si existen facturas vinculadas a este presupuesto
       const hasInvoices = budgets.some(doc => doc.type === 'factura' && (doc.parent_id === b.id || doc.id === b.id));
       if (hasInvoices) {
         alert('⚠️ NO SE PUEDE ELIMINAR: Este presupuesto ya tiene facturas emitidas. Para borrarlo, primero debes anular o revertir sus facturas.');
         return;
       }
 
-      // 2. Comprobar si existen apuntes o adjuntos en la orden de trabajo vinculada
       const linkedOrder = workOrders.find(wo => wo.budget_id === b.id);
       if (linkedOrder) {
         const hasExpenses = allExpenses.some(exp => exp.work_order_id === linkedOrder.id);
@@ -1029,21 +1080,30 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         </div>
       )}
 
-      {/* MODAL CREADOR DE PRESUPUESTO */}
+      {/* MODAL CREADOR DE PRESUPUESTO (AQUÍ ESTÁ EL BOTÓN DE IA) */}
       {showAddBudgetModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4 overflow-y-auto backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto my-auto animate-in zoom-in-95">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3 shrink-0">
+            
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 shrink-0 gap-3">
               <h3 className="font-black text-lg text-slate-800">📄 Creador de Presupuesto</h3>
-              <button onClick={() => setShowAddBudgetModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xl transition">✕</button>
+              <div className="flex items-center gap-2">
+                {/* BOTÓN MÁGICO DE ESCANEAR CON IA */}
+                <label className={`px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black cursor-pointer hover:bg-emerald-100 transition flex items-center gap-2 shadow-sm ${isScanning ? 'opacity-50 pointer-events-none' : ''}`}>
+                  {isScanning ? '⏳ Analizando Imagen...' : '📸 Escanear Parte a Mano'}
+                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleScanWorkOrder} />
+                </label>
+                <button type="button" onClick={() => setShowAddBudgetModal(false)} className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition">✕</button>
+              </div>
             </div>
+
             <form onSubmit={handleSaveBudget} className="space-y-4 text-xs">
               <div className="relative">
                 <div className="flex justify-between items-end mb-1">
                   <label className="block font-bold text-slate-600 uppercase">Seleccionar Cliente de CRM *</label>
                   <button type="button" onClick={() => { setShowAddBudgetModal(false); setDocTab('clientes'); openNewCrmModal(); }} className="text-[9px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold hover:bg-indigo-100 border border-indigo-100 transition">➕ NUEVO CRM</button>
                 </div>
-                <input type="text" required placeholder="Escribe para buscar..." value={bClient} onChange={handleClientInput} onFocus={() => bClient.trim() && setShowSuggestions(true)} onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} className="w-full p-2.5 border-2 border-indigo-300 bg-indigo-50/50 rounded-lg focus:border-indigo-600 font-bold outline-none transition" />
+                <input type="text" required placeholder="Escribe para buscar o escanea un parte..." value={bClient} onChange={handleClientInput} onFocus={() => bClient.trim() && setShowSuggestions(true)} onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} className="w-full p-2.5 border-2 border-indigo-300 bg-indigo-50/50 rounded-lg focus:border-indigo-600 font-bold outline-none transition" />
                 {showSuggestions && filteredSuggestions.length > 0 && (
                   <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto">
                     {filteredSuggestions.map(cli => <div key={cli.id} onClick={() => handleSelectSuggestion(cli)} className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 font-bold transition">{cli.name} <span className="font-normal text-slate-500 ml-2">{cli.phone}</span></div>)}
@@ -1051,7 +1111,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 )}
               </div>
 
-              {/* CÓDIGO CORRELATIVO ANUAL AUTOMÁTICO, REFERENCIA Y VALIDEZ */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-bold text-slate-600 mb-1">Código Presupuesto</label>
