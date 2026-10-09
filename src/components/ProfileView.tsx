@@ -12,44 +12,159 @@ interface ProfileViewProps {
 export default function ProfileView({ user }: ProfileViewProps) {
   const [activeTab, setActiveTab] = useState<'datos' | 'planes' | 'equipo'>('datos');
   
-  // Datos del usuario simulados (Se cargarían de Supabase)
-  const [profile, setProfile] = useState({
-    name: user?.name || 'Usuario',
-    phone: user?.phone || '',
-    email: user?.email || '',
-    plan: user?.plan || 'free', // 'free', 'empresa', 'empresa_pro'
-    role: user?.role || 'user_particular', // 'gerente', 'comercial', 'user_particular'
-    companyCode: 'EMP-7392' // Código que da el gerente a sus empleados
-  });
+  // Datos reales del perfil (sincronizados con Supabase)
+  const [profile, setProfile] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Estado para el Free que quiere unirse a una empresa
   const [joinCode, setJoinCode] = useState('');
+  const [joinError, setJoinError] = useState('');
 
   // Estado del gerente (Sus comerciales vinculados)
-  const [team, setTeam] = useState([
-    { id: 1, name: 'Carlos (Comercial Centro)', phone: '+34 600 111 222', modules: { crm: true, rutas: true, presupuestos: false } },
-    { id: 2, name: 'Marta (Comercial Norte)', phone: '+34 600 333 444', modules: { crm: true, rutas: true, presupuestos: true } }
-  ]);
+  const [team, setTeam] = useState<any[]>([]);
 
-  // Manejar cambio de permisos por parte del Gerente
-  const toggleEmployeeModule = (empId: number, module: string) => {
-    setTeam(prev => prev.map(emp => {
-      if (emp.id === empId) {
-        return { ...emp, modules: { ...emp.modules, [module]: !emp.modules[module as keyof typeof emp.modules] } };
+  // 1. CARGAR DATOS REALES DE SUPABASE
+  useEffect(() => {
+    if (user && user.id) {
+      loadProfileData();
+    }
+  }, [user]);
+
+  const loadProfileData = async () => {
+    try {
+      setIsLoading(true);
+      // Cargar perfil propio
+      const { data: profileData, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      
+      if (error) throw error;
+
+      // Si es Gerente (plan PRO o rol supplier_owner), generar código si no tiene
+      let currentProfile = profileData;
+      if ((currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner') && !currentProfile.company_code) {
+        const newCode = 'EMP-' + Math.floor(1000 + Math.random() * 9000);
+        await supabase.from('profiles').update({ company_code: newCode }).eq('id', user.id);
+        currentProfile.company_code = newCode;
       }
-      return emp;
-    }));
+
+      setProfile(currentProfile);
+
+      // Si es Gerente, cargar a sus empleados (Los que tengan su ID como organization_id)
+      if (currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner') {
+        const { data: teamData } = await supabase
+          .from('profiles')
+          .select('id, name, phone, email, active_modules')
+          .eq('organization_id', user.id); // organization_id guarda el ID del jefe
+        
+        if (teamData) {
+          // Formateamos para que active_modules siempre sea un objeto aunque venga nulo
+          const formattedTeam = teamData.map(emp => ({
+            ...emp,
+            active_modules: emp.active_modules || { crm: false, rutas: false, presupuestos: false }
+          }));
+          setTeam(formattedTeam);
+        }
+      }
+    } catch (err) {
+      console.error("Error cargando perfil:", err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleJoinCompany = (e: React.FormEvent) => {
+  // 2. LÓGICA DEL FREE PARA UNIRSE A UNA EMPRESA
+  const handleJoinCompany = async (e: React.FormEvent) => {
     e.preventDefault();
+    setJoinError('');
+
     if (joinCode.length < 5) {
-      alert("Código no válido. Pídeselo a tu gerente.");
+      setJoinError("El código debe tener al menos 5 caracteres (Ej. EMP-1234)");
       return;
     }
-    alert(`¡Solicitud enviada a la empresa con código ${joinCode}!\n\nEn cuanto el gerente acepte, tu cuenta pasará a ser Comercial y él podrá desbloquearte los módulos de trabajo.`);
-    setJoinCode('');
+
+    try {
+      // Buscar si existe un gerente con ese código
+      const { data: managerData, error: searchError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('company_code', joinCode.toUpperCase())
+        .single();
+
+      if (searchError || !managerData) {
+        setJoinError("No se ha encontrado ninguna empresa con ese código.");
+        return;
+      }
+
+      // Si existe, nos vinculamos a él
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ 
+          organization_id: managerData.id, 
+          role: 'sales_rep' // Automáticamente pasa a ser comercial
+        })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      alert("¡Vinculación completada! Ahora formas parte de la empresa. Pide a tu gerente que te active los módulos en su panel.");
+      loadProfileData(); // Recargar para ver el cambio de rol
+
+    } catch (err: any) {
+      setJoinError("Hubo un error al intentar vincularte: " + err.message);
+    }
   };
+
+  // 3. LÓGICA DEL GERENTE PARA CAMBIAR PERMISOS
+  const toggleEmployeeModule = async (empId: string, moduleName: string) => {
+    // 1. Actualizar estado local rápido para que la UI no tenga lag
+    const updatedTeam = team.map(emp => {
+      if (emp.id === empId) {
+        return { 
+          ...emp, 
+          active_modules: { ...emp.active_modules, [moduleName]: !emp.active_modules[moduleName] } 
+        };
+      }
+      return emp;
+    });
+    setTeam(updatedTeam);
+
+    // 2. Guardar en Supabase en segundo plano
+    const employeeToUpdate = updatedTeam.find(e => e.id === empId);
+    if (employeeToUpdate) {
+      try {
+        await supabase
+          .from('profiles')
+          .update({ active_modules: employeeToUpdate.active_modules })
+          .eq('id', empId);
+      } catch (err) {
+        console.error("Error guardando permisos", err);
+        // Si falla, revertimos
+        loadProfileData();
+      }
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    try {
+      await supabase.from('profiles').update({
+        name: profile.name,
+        email: profile.email
+      }).eq('id', user.id);
+      alert("Datos guardados correctamente.");
+    } catch (e) {
+      alert("Error guardando datos.");
+    }
+  };
+
+  if (isLoading || !profile) {
+    return <div className="p-10 text-center font-bold text-slate-500">Cargando perfil...</div>;
+  }
+
+  // Comprobar si el usuario es VIP (Pro o Admin)
+  const isPro = profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner';
 
   return (
     <div className="bg-slate-50 min-h-full pb-24">
@@ -62,7 +177,9 @@ export default function ProfileView({ user }: ProfileViewProps) {
           </div>
           <div className="bg-white/20 p-3 rounded-2xl backdrop-blur-sm border border-white/30 text-center">
             <span className="block text-[9px] uppercase font-black tracking-widest text-indigo-100">Plan Actual</span>
-            <span className="block text-lg font-black">{profile.plan === 'free' ? 'FREE' : profile.plan === 'empresa' ? 'EMPRESA' : 'PRO'}</span>
+            <span className="block text-lg font-black uppercase">
+              {profile.plan === 'free' ? 'FREE' : profile.plan === 'empresa' ? 'EMPRESA' : 'PRO'}
+            </span>
           </div>
         </div>
       </div>
@@ -87,21 +204,21 @@ export default function ProfileView({ user }: ProfileViewProps) {
               <h3 className="font-black text-slate-800 border-b border-slate-100 pb-2">Información Personal</h3>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Nombre Completo</label>
-                <input type="text" defaultValue={profile.name} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
+                <input type="text" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Teléfono</label>
-                <input type="text" readOnly defaultValue={profile.phone} className="w-full p-3 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-500 outline-none" />
+                <input type="text" readOnly value={profile.phone} className="w-full p-3 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-500 outline-none" />
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Correo Electrónico</label>
-                <input type="email" defaultValue={profile.email} placeholder="tu@email.com" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
+                <input type="email" value={profile.email || ''} onChange={e => setProfile({...profile, email: e.target.value})} placeholder="tu@email.com" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
               </div>
-              <button className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition">Guardar Cambios</button>
+              <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition">Guardar Cambios</button>
             </div>
             
-            <button className="w-full py-4 text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 mt-6">
-              Cerrar Sesión
+            <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 mt-6">
+              Cerrar Sesión Completa
             </button>
           </div>
         )}
@@ -141,12 +258,19 @@ export default function ProfileView({ user }: ProfileViewProps) {
                 <li className="flex items-center gap-2">✅ Presupuestos y CRM ilimitados</li>
                 <li className="flex items-center gap-2 opacity-50">❌ Sin vinculación de comerciales</li>
               </ul>
-              {profile.plan !== 'empresa' && <button className="w-full mt-5 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-md">Mejorar a Empresa</button>}
+              {profile.plan !== 'empresa' && (
+                <button 
+                  onClick={() => window.location.href = 'https://buy.stripe.com/test_AQUI_TU_ENLACE_PRO'} 
+                  className="w-full mt-5 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-md"
+                >
+                  Mejorar a Empresa
+                </button>
+              )}
             </div>
 
             {/* Tarjeta Plan Empresa PRO */}
-            <div className={`bg-slate-900 p-5 rounded-3xl border-2 transition-all ${profile.plan === 'empresa_pro' ? 'border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.3)] relative' : 'border-slate-800'}`}>
-              {profile.plan === 'empresa_pro' && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-slate-900 text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
+            <div className={`bg-slate-900 p-5 rounded-3xl border-2 transition-all ${isPro ? 'border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.3)] relative' : 'border-slate-800'}`}>
+              {isPro && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-slate-900 text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <div className="flex justify-between items-start">
                 <h4 className="font-black text-xl text-white">Empresa PRO</h4>
                 <span className="text-2xl">🚀</span>
@@ -159,7 +283,14 @@ export default function ProfileView({ user }: ProfileViewProps) {
                 <li className="flex items-center gap-2">🕹️ Gestor de Permisos de Módulos</li>
                 <li className="flex items-center gap-2 text-xs italic">+15€/mes por cada licencia extra de comercial</li>
               </ul>
-              {profile.plan !== 'empresa_pro' && <button className="w-full mt-5 py-3 bg-amber-400 text-slate-900 font-black rounded-xl shadow-md">Contratar PRO</button>}
+              {!isPro && (
+                <button 
+                  onClick={() => window.location.href = 'https://buy.stripe.com/test_AQUI_TU_ENLACE_PRO_PLUS'} 
+                  className="w-full mt-5 py-3 bg-amber-400 text-slate-900 font-black rounded-xl shadow-md"
+                >
+                  Contratar PRO
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -170,28 +301,40 @@ export default function ProfileView({ user }: ProfileViewProps) {
         {activeTab === 'equipo' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             
-            {/* VISTA 1: Usuario FREE (Añadir código de jefe) */}
-            {profile.plan !== 'empresa_pro' && (
-              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm text-center">
-                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">🔗</div>
-                <h3 className="font-black text-xl text-slate-800 mb-2">Únete a tu Empresa</h3>
-                <p className="text-sm text-slate-500 font-medium mb-6">Si trabajas para una agencia, pídele a tu gerente su <strong>Código de Equipo</strong> e introdúcelo aquí. Tus módulos se desbloquearán automáticamente según los permisos que te asigne.</p>
-                
-                <form onSubmit={handleJoinCompany}>
-                  <input 
-                    type="text" 
-                    value={joinCode}
-                    onChange={e => setJoinCode(e.target.value.toUpperCase())}
-                    placeholder="EMP-XXXX" 
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-center font-black text-2xl tracking-[0.2em] focus:outline-none focus:border-indigo-500 uppercase mb-4" 
-                  />
-                  <button type="submit" className="w-full py-4 bg-slate-800 text-white rounded-xl font-black shadow-md hover:bg-slate-900 transition">Solicitar Vinculación</button>
-                </form>
+            {/* VISTA 1: Usuario FREE o Empleado (Ya vinculado) */}
+            {!isPro && (
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm text-center relative overflow-hidden">
+                {profile.organization_id ? (
+                  <>
+                    <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">✅</div>
+                    <h3 className="font-black text-xl text-slate-800 mb-2">Cuenta Vinculada</h3>
+                    <p className="text-sm text-slate-500 font-medium">Tu cuenta está vinculada a una Agencia. Tu gerente gestiona los módulos a los que tienes acceso.</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">🔗</div>
+                    <h3 className="font-black text-xl text-slate-800 mb-2">Únete a tu Empresa</h3>
+                    <p className="text-sm text-slate-500 font-medium mb-6">Si trabajas para una agencia, pídele a tu gerente su <strong>Código de Equipo</strong> e introdúcelo aquí. Tus módulos se desbloquearán automáticamente.</p>
+                    
+                    {joinError && <div className="text-rose-500 text-xs font-bold mb-4 bg-rose-50 p-2 rounded">{joinError}</div>}
+                    
+                    <form onSubmit={handleJoinCompany}>
+                      <input 
+                        type="text" 
+                        value={joinCode}
+                        onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                        placeholder="EMP-XXXX" 
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-center font-black text-2xl tracking-[0.2em] focus:outline-none focus:border-indigo-500 uppercase mb-4" 
+                      />
+                      <button type="submit" className="w-full py-4 bg-slate-800 text-white rounded-xl font-black shadow-md hover:bg-slate-900 transition cursor-pointer">Solicitar Vinculación</button>
+                    </form>
+                  </>
+                )}
               </div>
             )}
 
             {/* VISTA 2: Gerente (Plan Empresa Pro) */}
-            {profile.plan === 'empresa_pro' && (
+            {isPro && (
               <div className="space-y-4">
                 
                 {/* Caja de Código de Invitación */}
@@ -199,54 +342,59 @@ export default function ProfileView({ user }: ProfileViewProps) {
                   <div className="absolute top-0 right-0 -mr-4 -mt-4 text-7xl opacity-10">🏢</div>
                   <h3 className="font-bold text-indigo-200 text-sm uppercase tracking-widest mb-2">Código de tu Agencia</h3>
                   <div className="bg-white/20 p-4 rounded-xl border border-white/30 backdrop-blur-sm">
-                    <span className="font-black text-4xl tracking-widest">{profile.companyCode}</span>
+                    <span className="font-black text-4xl tracking-widest select-all">{profile.company_code}</span>
                   </div>
                   <p className="text-xs text-indigo-200 font-medium mt-3">Dale este código a tus comerciales para que vinculen su app gratuita a tu cuenta corporativa.</p>
                 </div>
 
                 {/* Lista de Empleados y Gestión de Módulos */}
                 <div>
-                  <div className="flex justify-between items-center mb-3 px-1">
+                  <div className="flex justify-between items-center mb-3 px-1 mt-6">
                     <h3 className="font-black text-slate-800">Mi Equipo ({team.length})</h3>
-                    <button className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg">+ Comprar Licencia</button>
                   </div>
 
                   <div className="space-y-3">
-                    {team.map(emp => (
-                      <div key={emp.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                        <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-                          <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center font-black text-slate-500">{emp.name.charAt(0)}</div>
-                          <div>
-                            <div className="font-black text-slate-800 text-sm">{emp.name}</div>
-                            <div className="text-xs font-mono text-slate-500">{emp.phone}</div>
-                          </div>
-                        </div>
-
-                        {/* Gestión de Permisos por Comercial */}
-                        <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Permisos (Interruptores de Módulos)</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {/* Interruptor CRM */}
-                            <label className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">
-                              <span className="text-xs font-bold text-slate-700">👥 CRM</span>
-                              <input type="checkbox" checked={emp.modules.crm} onChange={() => toggleEmployeeModule(emp.id, 'crm')} className="w-4 h-4 accent-indigo-600" />
-                            </label>
-                            
-                            {/* Interruptor RUTAS */}
-                            <label className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">
-                              <span className="text-xs font-bold text-slate-700">📍 Rutas</span>
-                              <input type="checkbox" checked={emp.modules.rutas} onChange={() => toggleEmployeeModule(emp.id, 'rutas')} className="w-4 h-4 accent-indigo-600" />
-                            </label>
-
-                            {/* Interruptor PRESUPUESTOS */}
-                            <label className="col-span-2 flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">
-                              <span className="text-xs font-bold text-slate-700">💶 Presupuestos (Full Access)</span>
-                              <input type="checkbox" checked={emp.modules.presupuestos} onChange={() => toggleEmployeeModule(emp.id, 'presupuestos')} className="w-4 h-4 accent-indigo-600" />
-                            </label>
-                          </div>
-                        </div>
+                    {team.length === 0 ? (
+                      <div className="bg-slate-50 border border-dashed border-slate-300 rounded-2xl p-6 text-center text-slate-500 font-medium text-sm">
+                        Todavía no tienes comerciales vinculados. Dales tu código <strong>{profile.company_code}</strong>.
                       </div>
-                    ))}
+                    ) : (
+                      team.map(emp => (
+                        <div key={emp.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                          <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                            <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-black">{emp.name?.charAt(0)}</div>
+                            <div>
+                              <div className="font-black text-slate-800 text-sm">{emp.name}</div>
+                              <div className="text-xs font-mono text-slate-500">{emp.phone}</div>
+                            </div>
+                          </div>
+
+                          {/* Gestión de Permisos por Comercial */}
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Permisos (Interruptores de Módulos)</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {/* Interruptor CRM */}
+                              <label className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition">
+                                <span className="text-xs font-bold text-slate-700">👥 CRM</span>
+                                <input type="checkbox" checked={emp.active_modules?.crm || false} onChange={() => toggleEmployeeModule(emp.id, 'crm')} className="w-4 h-4 accent-indigo-600" />
+                              </label>
+                              
+                              {/* Interruptor RUTAS */}
+                              <label className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition">
+                                <span className="text-xs font-bold text-slate-700">📍 Rutas</span>
+                                <input type="checkbox" checked={emp.active_modules?.rutas || false} onChange={() => toggleEmployeeModule(emp.id, 'rutas')} className="w-4 h-4 accent-indigo-600" />
+                              </label>
+
+                              {/* Interruptor PRESUPUESTOS */}
+                              <label className="col-span-2 flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition">
+                                <span className="text-xs font-bold text-slate-700">💶 Presupuestos (Full Access)</span>
+                                <input type="checkbox" checked={emp.active_modules?.presupuestos_facturas || false} onChange={() => toggleEmployeeModule(emp.id, 'presupuestos_facturas')} className="w-4 h-4 accent-indigo-600" />
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
 
