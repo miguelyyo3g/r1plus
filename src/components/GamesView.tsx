@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 // ============================================================================
-// 1. MOTOR TETRIS CLÁSICO
+// 1. MOTOR TETRIS CLÁSICO (100% Funcional y Mandos Mejorados)
 // ============================================================================
 const BOARD_WIDTH = 10;
 const BOARD_HEIGHT = 20;
@@ -82,6 +82,7 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
     const finalBoard = [...newEmptyRows, ...filteredBoard];
 
     const newScore = currentScore + 10 + (linesCleared * 100);
+    
     setBoard(finalBoard);
     setScore(newScore);
     setPiece(null);
@@ -161,7 +162,6 @@ function TetrisGame({ level, onBack, onWin }: { level: number, onBack: () => voi
         </div>
       </div>
 
-      {/* MANDO TÁCTIL ESTILO CONSOLA (Separado y arriba del BottomNav) */}
       <div className="w-full max-w-[340px] flex gap-3 shrink-0 pb-24">
         <div className="flex gap-2 flex-1">
           <button onClick={moveLeft} className="flex-1 bg-slate-700 active:bg-slate-800 rounded-2xl text-white font-black text-3xl shadow-[0_6px_0_rgb(51,65,85)] active:shadow-none active:translate-y-[6px] transition-all flex items-center justify-center p-4">←</button>
@@ -202,7 +202,6 @@ function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => voi
     const newSolved = BASE_SUDOKU.map(n => nums[n - 1]);
     const cellsToHide = Math.min(60, 20 + Math.floor(level * 0.4));
     const newInitial = [...newSolved];
-    
     let hidden = 0;
     while (hidden < cellsToHide) {
       const rIdx = Math.floor(Math.random() * 81);
@@ -244,12 +243,10 @@ function SudokuGame({ level, onBack, onWin }: { level: number, onBack: () => voi
             const isBottomBorder = Math.floor(i / 9) === 2 || Math.floor(i / 9) === 5;
             const isInitial = initialBoard[i] !== 0;
             const isSelected = selectedCell === i;
-            
             return (
               <div 
                 key={i} onClick={() => { if (!isInitial) setSelectedCell(i); }}
-                className={`
-                  aspect-square flex items-center justify-center text-xl sm:text-2xl font-black cursor-pointer select-none transition-all
+                className={`aspect-square flex items-center justify-center text-xl sm:text-2xl font-black cursor-pointer select-none transition-all
                   ${isRightBorder ? 'border-r-2 border-r-slate-800' : ''} ${isBottomBorder ? 'border-b-2 border-b-slate-800' : ''}
                   ${isSelected ? 'bg-indigo-500 text-white shadow-inner scale-95' : 'bg-white'}
                   ${isInitial ? 'text-slate-800 bg-slate-100' : (!isSelected ? 'text-indigo-600' : '')}
@@ -288,20 +285,17 @@ function WordSearchGame({ level, onBack, onWin }: { level: number, onBack: () =>
   const [selectedCells, setSelectedCells] = useState<number[]>([]);
 
   useEffect(() => {
-    // Escoger palabras según nivel (Mín 2, Máx 5)
-    const numWords = Math.min(5, 1 + Math.ceil(level / 10));
+    const numWords = Math.min(5, 2 + Math.floor(level / 10));
     const wordsToFind = [...ALL_WORDS].sort(() => Math.random() - 0.5).slice(0, numWords);
     setTargetWords(wordsToFind);
 
     const newBoard = Array(64).fill('');
-    // Insertar palabras de forma simple (horizontal)
     wordsToFind.forEach(word => {
       let placed = false;
       while (!placed) {
         const row = Math.floor(Math.random() * 8);
-        const col = Math.floor(Math.random() * (8 - word.length));
+        const col = Math.floor(Math.random() * (8 - word.length + 1)); // Fix de desbordamiento horizontal
         const idx = row * 8 + col;
-        // Comprobar si cabe
         let canPlace = true;
         for (let i = 0; i < word.length; i++) {
           if (newBoard[idx + i] !== '' && newBoard[idx + i] !== word[i]) { canPlace = false; break; }
@@ -313,7 +307,6 @@ function WordSearchGame({ level, onBack, onWin }: { level: number, onBack: () =>
       }
     });
 
-    // Rellenar resto
     const chars = 'ABCDEFGHIJKLMNÑOPQRSTUVWXYZ';
     for (let i = 0; i < 64; i++) {
       if (newBoard[i] === '') newBoard[i] = chars.charAt(Math.floor(Math.random() * chars.length));
@@ -325,14 +318,11 @@ function WordSearchGame({ level, onBack, onWin }: { level: number, onBack: () =>
 
   const toggleCell = (i: number) => {
     let newSelected = [...selectedCells];
-    if (newSelected.includes(i)) {
-      newSelected = newSelected.filter(c => c !== i);
-    } else {
-      newSelected.push(i);
-    }
+    if (newSelected.includes(i)) newSelected = newSelected.filter(c => c !== i);
+    else newSelected.push(i);
+    
     setSelectedCells(newSelected);
 
-    // Comprobar si forma alguna palabra
     const wordFormed = newSelected.map(idx => board[idx]).join('');
     const wordFormedRev = wordFormed.split('').reverse().join('');
     
@@ -343,12 +333,12 @@ function WordSearchGame({ level, onBack, onWin }: { level: number, onBack: () =>
     if (matchedWord) {
       const newFound = [...foundWords, matchedWord];
       setFoundWords(newFound);
-      setSelectedCells([]); // Resetear selección al encontrar una
+      setSelectedCells([]); 
       if (newFound.length === targetWords.length) {
         setTimeout(() => onWin(level * 50), 500);
       }
     } else if (newSelected.length >= 8) {
-      setSelectedCells([]); // Limpiar si selecciona muchas a lo loco
+      setSelectedCells([]); 
     }
   };
 
@@ -363,27 +353,24 @@ function WordSearchGame({ level, onBack, onWin }: { level: number, onBack: () =>
         <button onClick={() => onWin(level * 100)} className="px-2 py-1 bg-emerald-200 text-emerald-800 rounded-md text-[10px] font-bold border border-emerald-400">Ganar</button>
       </div>
 
-      {/* Lista de Palabras */}
-      <div className="flex flex-wrap justify-center gap-2 mb-4">
+      <div className="flex flex-wrap justify-center gap-2 mb-4 shrink-0">
         {targetWords.map(word => (
-          <span key={word} className={`px-3 py-1 rounded-full text-xs font-black tracking-widest transition-all duration-500 ${foundWords.includes(word) ? 'bg-emerald-500 text-white line-through scale-90' : 'bg-white text-slate-700 border border-slate-200'}`}>
+          <span key={word} className={`px-3 py-1 rounded-full text-xs font-black tracking-widest transition-all duration-500 ${foundWords.includes(word) ? 'bg-emerald-500 text-white line-through scale-90 shadow-inner' : 'bg-white text-slate-700 border border-slate-200 shadow-sm'}`}>
             {word}
           </span>
         ))}
       </div>
 
-      {/* Tablero Sopa */}
-      <div className="bg-white p-2 rounded-xl shadow-lg border-2 border-emerald-800 w-full max-w-[340px] shrink-0 mb-4">
-        <div className="grid grid-cols-8 gap-1 bg-emerald-50 p-1 rounded-lg">
+      <div className="bg-white p-2 sm:p-4 rounded-2xl shadow-xl border-2 border-emerald-800 w-full max-w-[340px] shrink-0 mb-4">
+        <div className="grid grid-cols-8 gap-1 bg-emerald-50 p-1 sm:p-2 rounded-xl">
           {board.map((char, i) => {
             const isSelected = selectedCells.includes(i);
             return (
               <div 
-                key={i} 
-                onClick={() => toggleCell(i)}
+                key={i} onClick={() => toggleCell(i)}
                 className={`
-                  aspect-square flex items-center justify-center text-lg sm:text-xl font-black cursor-pointer select-none rounded-md transition-all
-                  ${isSelected ? 'bg-emerald-500 text-white shadow-inner scale-95' : 'bg-white text-slate-800 shadow-sm border border-emerald-100 hover:bg-emerald-100'}
+                  aspect-square flex items-center justify-center text-lg sm:text-xl font-black cursor-pointer select-none rounded-lg transition-all
+                  ${isSelected ? 'bg-emerald-500 text-white shadow-inner scale-90' : 'bg-white text-slate-800 shadow-sm border-b-4 border-emerald-100 hover:bg-emerald-100 hover:-translate-y-1 hover:shadow-md'}
                 `}
               >
                 {char}
@@ -403,51 +390,160 @@ function WordSearchGame({ level, onBack, onWin }: { level: number, onBack: () =>
 }
 
 // ============================================================================
-// 4. MOTOR CANDY MATCH (Candicas)
+// 4. MOTOR CANDY MATCH (Motor Genuino Match-3 con Gravedad y Especiales)
 // ============================================================================
-const CANDIES = ['🍎', '🍋', '🍇', '🫐', '🍊'];
-const GRID_SIZE = 6;
+const GRID_SIZE = 8;
+const BASIC_CANDIES = ['🍎', '🍋', '🍇', '🫐', '🍊'];
+const SPECIAL_4 = '💥'; // Caramelo explosivo
+const SPECIAL_5 = '🌈'; // Bomba de color
 
 function CandyGame({ level, onBack, onWin }: { level: number, onBack: () => void, onWin: (score: number) => void }) {
   const [board, setBoard] = useState<string[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [score, setScore] = useState(0);
-  const targetScore = level * 200;
+  const [isProcessing, setIsProcessing] = useState(false);
+  const targetScore = level * 800;
 
-  // Llenar tablero aleatorio sin combos iniciales (simplificado)
+  // Inicializar tablero sin combinaciones hechas
   useEffect(() => {
-    const initial = Array.from({length: GRID_SIZE * GRID_SIZE}, () => CANDIES[Math.floor(Math.random() * CANDIES.length)]);
+    const initial = Array(GRID_SIZE * GRID_SIZE).fill('').map(() => BASIC_CANDIES[Math.floor(Math.random() * BASIC_CANDIES.length)]);
     setBoard(initial);
   }, []);
 
+  const checkMatches = useCallback((currentBoard: string[]) => {
+    let newBoard = [...currentBoard];
+    let matchFound = false;
+    let newScore = 0;
+    let matchedIndices = new Set<number>();
+    let specialPlacements = new Map<number, string>();
+
+    // Buscamos coincidencias horizontales
+    for (let r = 0; r < GRID_SIZE; r++) {
+      let matchLen = 1;
+      for (let c = 0; c < GRID_SIZE; c++) {
+        const i = r * GRID_SIZE + c;
+        // Solo empatamos frutas normales (ni explosivos ni vacíos)
+        if (c < GRID_SIZE - 1 && newBoard[i] !== '' && newBoard[i] !== SPECIAL_4 && newBoard[i] !== SPECIAL_5 && newBoard[i] === newBoard[i + 1]) {
+          matchLen++;
+        } else {
+          if (matchLen >= 3) {
+            for (let j = 0; j < matchLen; j++) matchedIndices.add(i - j);
+            if (matchLen === 4) specialPlacements.set(i - 1, SPECIAL_4); // Si son 4, ponemos un explosivo
+            if (matchLen >= 5) specialPlacements.set(i - 2, SPECIAL_5);  // Si son 5+, ponemos un arcoíris
+            newScore += matchLen * 10;
+            matchFound = true;
+          }
+          matchLen = 1;
+        }
+      }
+    }
+
+    // Buscamos coincidencias verticales
+    for (let c = 0; c < GRID_SIZE; c++) {
+      let matchLen = 1;
+      for (let r = 0; r < GRID_SIZE; r++) {
+        const i = r * GRID_SIZE + c;
+        if (r < GRID_SIZE - 1 && newBoard[i] !== '' && newBoard[i] !== SPECIAL_4 && newBoard[i] !== SPECIAL_5 && newBoard[i] === newBoard[i + GRID_SIZE]) {
+          matchLen++;
+        } else {
+          if (matchLen >= 3) {
+            for (let j = 0; j < matchLen; j++) matchedIndices.add(i - (j * GRID_SIZE));
+            // No sobreescribir un arcoíris si ya se generó en horizontal
+            if (matchLen === 4 && !specialPlacements.has(i - GRID_SIZE)) specialPlacements.set(i - GRID_SIZE, SPECIAL_4);
+            if (matchLen >= 5) specialPlacements.set(i - (2 * GRID_SIZE), SPECIAL_5);
+            newScore += matchLen * 10;
+            matchFound = true;
+          }
+          matchLen = 1;
+        }
+      }
+    }
+
+    if (matchFound) {
+      matchedIndices.forEach(i => newBoard[i] = ''); // Vaciamos los que hicieron match
+      specialPlacements.forEach((val, idx) => newBoard[idx] = val); // Colocamos los especiales
+    }
+
+    return { matchFound, newBoard, newScore };
+  }, []);
+
+  const applyGravity = useCallback((currentBoard: string[]) => {
+    let newBoard = [...currentBoard];
+    for (let c = 0; c < GRID_SIZE; c++) {
+      let col = [];
+      for (let r = 0; r < GRID_SIZE; r++) { col.push(newBoard[r * GRID_SIZE + c]); }
+      col = col.filter(val => val !== ''); // Quitamos los vacíos
+      while (col.length < GRID_SIZE) { col.unshift(BASIC_CANDIES[Math.floor(Math.random() * BASIC_CANDIES.length)]); } // Añadimos nuevos arriba
+      for (let r = 0; r < GRID_SIZE; r++) { newBoard[r * GRID_SIZE + c] = col[r]; } // Volvemos a pegar la columna
+    }
+    return newBoard;
+  }, []);
+
+  // Bucle automático de gravedad (CASCADA)
+  useEffect(() => {
+    if (board.length === 0 || isProcessing) return;
+    const processBoard = () => {
+      const { matchFound, newBoard, newScore } = checkMatches(board);
+      if (matchFound) {
+        setIsProcessing(true);
+        setScore(s => s + newScore);
+        setBoard(newBoard); // Mostramos los huecos vacíos/explosiones
+        
+        setTimeout(() => {
+          setBoard(applyGravity(newBoard)); // 400ms después caen las nuevas fichas
+          setIsProcessing(false); // Liberamos para que el useEffect se vuelva a llamar solo y busque nuevos combos
+        }, 400); 
+      } else {
+        if (score >= targetScore) onWin(score);
+      }
+    };
+    processBoard();
+  }, [board, isProcessing, score, targetScore, onWin, checkMatches, applyGravity]);
+
   const handleCellClick = (idx: number) => {
+    if (isProcessing) return;
+
     if (selected === null) {
       setSelected(idx);
     } else {
-      // Intentar intercambio si son adyacentes
       const isAdj = (idx === selected - 1 && idx % GRID_SIZE !== GRID_SIZE - 1) || 
                     (idx === selected + 1 && idx % GRID_SIZE !== 0) || 
                     idx === selected - GRID_SIZE || 
                     idx === selected + GRID_SIZE;
       
       if (isAdj) {
-        const newBoard = [...board];
-        const temp = newBoard[idx];
-        newBoard[idx] = newBoard[selected];
-        newBoard[selected] = temp;
+        let tempBoard = [...board];
+        const s1 = tempBoard[selected];
+        const s2 = tempBoard[idx];
+
+        // LÓGICA BOMBA ARCOÍRIS 🌈: Si intercambias una bomba con una fruta, elimina todas las de ese color.
+        if (s1 === SPECIAL_5 || s2 === SPECIAL_5) {
+          const targetColor = s1 === SPECIAL_5 ? s2 : s1;
+          tempBoard[selected] = '';
+          tempBoard[idx] = '';
+          if (targetColor !== SPECIAL_5 && targetColor !== SPECIAL_4) {
+            for(let i=0; i<64; i++) {
+              if (tempBoard[i] === targetColor) tempBoard[i] = '';
+            }
+          }
+          setIsProcessing(true);
+          setScore(s => s + 300);
+          setBoard(tempBoard);
+          setTimeout(() => { setBoard(applyGravity(tempBoard)); setIsProcessing(false); }, 400);
+          setSelected(null);
+          return;
+        }
+
+        // Intercambio normal
+        tempBoard[selected] = s2;
+        tempBoard[idx] = s1;
         
-        // MVP: En este Candy básico, damos puntos por cada movimiento, en la V2 se calculan lineas.
-        const points = 50;
-        setScore(s => {
-          const newS = s + points;
-          if (newS >= targetScore) setTimeout(() => onWin(newS), 300);
-          return newS;
-        });
-        
-        // Rellenar de nuevo (Simulación de romper y caer)
-        newBoard[idx] = CANDIES[Math.floor(Math.random() * CANDIES.length)];
-        newBoard[selected] = CANDIES[Math.floor(Math.random() * CANDIES.length)];
-        setBoard(newBoard);
+        const { matchFound } = checkMatches(tempBoard);
+        if (matchFound) {
+          setBoard(tempBoard); // Movimiento válido, el useEffect se encargará de explotar y caer.
+        } else {
+          // Movimiento inválido, no hace nada visualmente (podría añadirse una animación de rechazo)
+        }
       }
       setSelected(null);
     }
@@ -461,20 +557,27 @@ function CandyGame({ level, onBack, onWin }: { level: number, onBack: () => void
           <div className="text-rose-900 font-black text-xl">CANDY MATCH</div>
           <div className="text-xs text-rose-600 font-bold uppercase tracking-widest">Nivel {level}</div>
         </div>
-        <div className="text-rose-600 font-black text-xl">{score} / {targetScore}</div>
+        <button onClick={() => onWin(level * 100)} className="px-2 py-1 bg-rose-200 text-rose-800 rounded-md text-[10px] font-bold border border-rose-400">Ganar</button>
       </div>
 
-      <p className="text-xs text-rose-500 font-bold mb-4 text-center">Intercambia frutas adyacentes para ganar puntos.</p>
+      <div className="w-full max-w-[340px] flex justify-between items-end mb-2 shrink-0">
+        <span className="text-xs text-rose-500 font-bold">Junta 3+ frutas</span>
+        <span className="font-black text-2xl text-rose-600 drop-shadow-sm">{score} <span className="text-sm text-rose-400">/ {targetScore}</span></span>
+      </div>
 
-      <div className="bg-white p-2 rounded-2xl shadow-xl border-4 border-rose-200 w-full max-w-[340px] shrink-0 mb-24">
-        <div className="grid grid-cols-6 gap-1 bg-rose-50 p-2 rounded-xl">
+      {/* Tablero Candy Genuino */}
+      <div className="bg-white p-2 sm:p-3 rounded-2xl shadow-xl border-4 border-rose-200 w-full max-w-[340px] shrink-0 mb-24">
+        <div className="grid grid-cols-8 gap-1 bg-rose-50 p-1 sm:p-2 rounded-xl">
           {board.map((candy, i) => (
             <div 
               key={i} 
               onClick={() => handleCellClick(i)}
               className={`
-                aspect-square flex items-center justify-center text-3xl sm:text-4xl cursor-pointer select-none rounded-xl transition-all duration-300
-                ${selected === i ? 'bg-rose-200 scale-110 shadow-lg ring-4 ring-rose-400 z-10' : 'bg-white shadow-sm border border-rose-100 hover:scale-105 hover:shadow-md'}
+                aspect-square flex items-center justify-center text-2xl sm:text-3xl cursor-pointer select-none rounded-xl transition-all duration-300
+                ${candy === '' ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}
+                ${selected === i ? 'bg-rose-200 scale-110 shadow-lg ring-4 ring-rose-400 z-10' : 'bg-white shadow-sm border-b-4 border-rose-100 hover:scale-105 hover:shadow-md'}
+                ${candy === SPECIAL_4 ? 'animate-pulse' : ''}
+                ${candy === SPECIAL_5 ? 'animate-spin-slow' : ''}
               `}
             >
               {candy}
@@ -514,8 +617,8 @@ export default function GamesView() {
   const games = [
     { id: 'sudoku', name: 'Sudoku Pro', icon: '🔢', color: 'bg-blue-500', hover: 'hover:bg-blue-600', desc: 'Entrena tu lógica', totalLevels: 100 },
     { id: 'tetris', name: 'Tetris Arcade', icon: '🧱', color: 'bg-indigo-500', hover: 'hover:bg-indigo-600', desc: 'Encaja las piezas', totalLevels: 100 },
-    { id: 'sopa', name: 'Sopa Letras', icon: '🔠', color: 'bg-emerald-500', hover: 'hover:bg-emerald-600', desc: 'Encuentra la palabra', totalLevels: 100 },
-    { id: 'candy', name: 'Candy Match', icon: '🍬', color: 'bg-rose-500', hover: 'hover:bg-rose-600', desc: 'Une las frutas', totalLevels: 100 },
+    { id: 'sopa', name: 'Sopa Letras', icon: '🔠', color: 'bg-emerald-500', hover: 'hover:bg-emerald-600', desc: 'Encuentra palabras', totalLevels: 100 },
+    { id: 'candy', name: 'Candy Match', icon: '🍬', color: 'bg-rose-500', hover: 'hover:bg-rose-600', desc: 'Une frutas (Match-3)', totalLevels: 100 },
   ];
 
   const handleWinLevel = (score: number) => {
