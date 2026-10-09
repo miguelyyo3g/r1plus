@@ -99,7 +99,7 @@ function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps)
           {activeTab === 'tracking' && <TrackingView user={user} />}
           
           {/* Aquí están las rutas del Centro de Módulos y sus sub-herramientas */}
-          {activeTab === 'modules' && <ModulesView onOpenModule={handleTabChange} />} 
+          {activeTab === 'modules' && <ModulesView onOpenModule={handleTabChange} userPlan={user.plan} />} 
           {activeTab === 'documents' && <DocumentsView user={user} />}
           {activeTab === 'works' && <FreelanceWorksView user={user} />}
           {activeTab === 'juegos' && <GamesView />} {/* <-- NUEVO: Ruta para cargar el módulo de juegos */}
