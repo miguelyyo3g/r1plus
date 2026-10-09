@@ -16,7 +16,8 @@ export async function POST(req: Request) {
       throw new Error("Falta la clave GEMINI_API_KEY en las variables de entorno de Vercel.");
     }
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+    // AQUÍ ESTÁ EL CAMBIO MÁGICO: Hemos cambiado gemini-1.5-flash por gemini-2.5-flash
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -42,7 +43,6 @@ export async function POST(req: Request) {
 
     const data = await response.json();
 
-    // AQUÍ ESTÁ LA CLAVE: Si Google da error, leemos exactamente qué dice
     if (!response.ok) {
       console.error("Error de Google API:", data);
       throw new Error(`Google dice: ${data.error?.message || response.statusText}`);
