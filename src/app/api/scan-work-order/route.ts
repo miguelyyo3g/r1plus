@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
 
-export const maxDuration = 60; 
-
 export async function POST(req: Request) {
   try {
     const { image } = await req.json();
@@ -18,17 +16,19 @@ export async function POST(req: Request) {
       throw new Error("Falta la clave GEMINI_API_KEY en las variables de entorno de Vercel.");
     }
 
-    // EL MODELO CORRECTO Y ACTUALIZADO
-    const modelName = 'gemini-3.8-flash';
-    const maxRetries = 4;
+    // ESTRATEGIA ANTI-TIMEOUT DE VERCEL
+    // Si el principal tiene alta demanda, saltamos al "Lite" (ultra rápido) sin hacer pausas
+    const modelsToTry = [
+      'gemini-3.8-flash',
+      'gemini-2.5-flash-lite'
+    ];
+
     let data = null;
     let lastError = "";
 
-    // Bucle de paciencia: si hay alta demanda, el servidor reintenta solo
-    for (let i = 0; i < maxRetries; i++) {
+    for (const modelName of modelsToTry) {
       try {
-        // Usamos la versión estable v1 de Google
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey}`, {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -58,14 +58,13 @@ export async function POST(req: Request) {
           const errMsg = resData.error?.message || response.statusText;
           lastError = errMsg;
           
-          // Si el error es de clave mal puesta o que el modelo no existe, rompemos el bucle
-          if (response.status === 400 || response.status === 403 || response.status === 404) {
+          // Si el error es de clave mal puesta, rompemos directamente
+          if (response.status === 400 || response.status === 403) {
             throw new Error(`Error de API: ${errMsg}`);
           }
           
-          // Si es un error de ALTA DEMANDA (429), esperamos 3 segundos y volvemos a intentarlo
-          console.log(`Intento ${i + 1} saturado por Google. Reintentando en 3 segundos...`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          // Si da error 404 (no existe) o 429/503 (alta demanda), probamos el siguiente modelo SIN esperar
+          console.log(`El modelo ${modelName} falló o está ocupado. Saltando al siguiente...`);
           continue; 
         }
 
@@ -76,14 +75,11 @@ export async function POST(req: Request) {
       } catch (e: any) {
         lastError = e.message;
         if (e.message.includes("Error de API")) throw e;
-        // Esperamos 3 segundos en caso de micro-caídas de red
-        await new Promise(resolve => setTimeout(resolve, 3000));
       }
     }
 
-    // Si después de 4 intentos no hay respuesta, avisamos
     if (!data || !data.candidates || data.candidates.length === 0 || !data.candidates[0].content) {
-        throw new Error(`Los servidores de Google tienen una alta demanda extrema ahora mismo. El sistema reintentó ${maxRetries} veces sin éxito. Por favor, espere 1 minuto e inténtelo de nuevo.`);
+        throw new Error(`Todos los modelos de IA de Google están saturados ahora mismo. Último intento fallido: ${lastError}`);
     }
     
     // Limpiamos el texto que devuelve la IA
