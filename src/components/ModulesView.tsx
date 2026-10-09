@@ -64,7 +64,6 @@ export default function ModulesView({ onOpenModule }: ModulesViewProps) {
           />
         )}
 
-        {/* ¡AQUÍ ESTÁ EL CAMBIO! Ya no hay alert, ahora abre la vista 'works' */}
         {(isAdmin || mods.obras_autonomos) && (
           <ModuleCard 
             title="Partes de Trabajo" 
@@ -81,15 +80,25 @@ export default function ModulesView({ onOpenModule }: ModulesViewProps) {
           />
         )}
 
+        {/* NUEVO MÓDULO: SALA DE JUEGOS */}
+        <ModuleCard 
+          title="Sala de Juegos" 
+          icon="🎮" 
+          onClick={() => onOpenModule('juegos')} 
+          customClass="bg-rose-50 border-rose-200 hover:border-rose-400 hover:bg-rose-100"
+        />
+
       </div>
     </div>
   );
 }
 
-// Componente de diseño para cada botón cuadrado
-function ModuleCard({ title, icon, onClick }: { title: string, icon: string, onClick: () => void }) {
+// Componente de diseño para cada botón cuadrado (Actualizado para permitir colores personalizados)
+function ModuleCard({ title, icon, onClick, customClass = '' }: { title: string, icon: string, onClick: () => void, customClass?: string }) {
+  const baseClass = customClass ? customClass : "bg-white border-slate-200 hover:border-indigo-300";
+  
   return (
-    <button onClick={onClick} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all flex flex-col items-center justify-center gap-3 active:scale-95 cursor-pointer">
+    <button onClick={onClick} className={`p-5 rounded-2xl border shadow-sm hover:shadow-md transition-all flex flex-col items-center justify-center gap-3 active:scale-95 cursor-pointer ${baseClass}`}>
       <span className="text-4xl">{icon}</span>
       <span className="text-xs font-bold text-slate-700 text-center leading-tight">{title}</span>
     </button>

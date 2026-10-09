@@ -11,7 +11,8 @@ import DocumentsView from '@/components/DocumentsView';
 import ProfileView from '@/components/ProfileView';
 import AdminDashboardView from '@/components/AdminDashboardView';
 import ModulesView from '@/components/ModulesView'; 
-import FreelanceWorksView from '@/components/FreelanceWorksView'; // <-- Añadimos FreelanceWorksView
+import FreelanceWorksView from '@/components/FreelanceWorksView'; 
+import GamesView from '@/components/GamesView'; // <-- NUEVO: Importamos la vista de juegos
 
 // Importamos los módulos de Layout
 import Header from '@/components/layout/Header';
@@ -27,8 +28,8 @@ interface MainAppViewProps {
 function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps) {
   const getDefaultTab = () => user.role === 'sales_rep' ? 'tracking' : 'chat';
   
-  // Añadimos 'works' a los tipos permitidos
-  const [activeTab, setActiveTab] = useState<'chat'|'calendar'|'tracking'|'modules'|'documents'|'works'|'tu'>(getDefaultTab());
+  // Añadimos 'juegos' a los tipos permitidos
+  const [activeTab, setActiveTab] = useState<'chat'|'calendar'|'tracking'|'modules'|'documents'|'works'|'juegos'|'tu'>(getDefaultTab());
   const displayRole = isAdmin ? 'supplier_owner' : user.role;
   
   const tabHistoryRef = useRef<string[]>([getDefaultTab()]);
@@ -101,6 +102,7 @@ function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps)
           {activeTab === 'modules' && <ModulesView onOpenModule={handleTabChange} />} 
           {activeTab === 'documents' && <DocumentsView user={user} />}
           {activeTab === 'works' && <FreelanceWorksView user={user} />}
+          {activeTab === 'juegos' && <GamesView />} {/* <-- NUEVO: Ruta para cargar el módulo de juegos */}
           
           {activeTab === 'tu' && <ProfileView user={user} />}
         </div>
@@ -109,7 +111,7 @@ function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps)
       {/* 3. COMPONENTE MODULAR NAVEGACIÓN INFERIOR */}
       <BottomNav 
         // Mantiene iluminado el icono de módulos si estás en alguna de sus sub-herramientas
-        activeTab={['documents', 'works'].includes(activeTab) ? 'modules' : activeTab} 
+        activeTab={['documents', 'works', 'juegos'].includes(activeTab) ? 'modules' : activeTab} // <-- NUEVO: Incluido 'juegos' en el array de iluminación
         displayRole={displayRole} 
         onTabChange={handleTabChange} 
       />
