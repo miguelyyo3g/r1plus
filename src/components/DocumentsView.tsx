@@ -35,7 +35,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [woTab, setWoTab] = useState<'info' | 'gastos' | 'archivos'>('info');
 
   // PRESUPUESTOS Y DATOS DEL CLIENTE
-  const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null); // NUEVO: Para saber si creamos o editamos
+  const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null); 
   const [bCode, setBCode] = useState('');
   const [bWorkOrderRef, setBWorkOrderRef] = useState('');
   const [bValidUntil, setBValidUntil] = useState('');
@@ -47,11 +47,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [bAddress, setBAddress] = useState('');
   const [bEmail, setBEmail] = useState('');
   const [bPhone, setBPhone] = useState('');
-  const [bContact, setBContact] = useState('');
-  const [bBankAccount, setBBankAccount] = useState(''); // NUEVO: Cuenta bancaria
+  const [bContact, setBContact] = useState(''); 
+  const [bBankAccount, setBBankAccount] = useState(''); 
   const [bItems, setBItems] = useState<Array<{ desc: string; qty: number; price: number }>>([{ desc: '', qty: 1, price: 0 }]);
 
-  const [showAdvancedClientFields, setShowAdvancedClientFields] = useState(false); // NUEVO: Plegar/desplegar datos del cliente
+  const [showAdvancedClientFields, setShowAdvancedClientFields] = useState(false); 
   const [isScanning, setIsScanning] = useState(false);
 
   const [filteredSuggestions, setFilteredSuggestions] = useState<any[]>([]);
@@ -78,16 +78,16 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const docPressTimer = useRef<any>(null);
   const isDocLongPress = useRef(false);
 
-  const isManager = user.role === 'admin' || user.role === 'supplier_owner' || user.role === 'gerente';
+  const isManager = user?.role === 'admin' || user?.role === 'supplier_owner' || user?.role === 'gerente';
 
   const generateNextBudgetCode = (budgetList = budgets) => {
     const currentYear = new Date().getFullYear();
     const prefix = `PRE-${currentYear}`;
-    const yearBudgets = budgetList.filter(b => b.code && b.code.startsWith(prefix));
+    const yearBudgets = budgetList.filter(b => b.code && String(b.code).startsWith(prefix));
     let nextNum = 1;
     if (yearBudgets.length > 0) {
       const numbers = yearBudgets.map(b => {
-        const numPart = b.code.replace(prefix, '');
+        const numPart = String(b.code).replace(prefix, '');
         const parsed = parseInt(numPart, 10);
         return isNaN(parsed) ? 0 : parsed;
       });
@@ -101,6 +101,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const fetchData = async () => {
     setIsLoading(true);
     try {
+      if (!user || !user.id) return;
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       setUserProfile(profile);
 
@@ -154,9 +155,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       };
       await getFolderBytes('');
       setStorageUsedMB(Number((totalBytes / (1024 * 1024)).toFixed(2)));
-    } catch (e) {
-      console.warn('Error calculando storage:', e);
-    }
+    } catch (e) {}
   };
 
   const resetBudgetForm = () => {
@@ -173,22 +172,24 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setBWorkOrderRef('');
     setBValidUntil('');
     setBItems([{ desc: '', qty: 1, price: 0 }]);
-    setShowAdvancedClientFields(false); // Colapsar por defecto
+    setShowAdvancedClientFields(false); 
   };
 
-  // NUEVO: Permite abrir el modal con los datos de un presupuesto ya guardado
   const handleOpenAddBudget = (budgetToEdit: any = null) => {
     if (budgetToEdit && budgetToEdit.id) {
       setEditingBudgetId(budgetToEdit.id);
-      setBCode(budgetToEdit.code);
+      setBCode(budgetToEdit.code || '');
       setBWorkOrderRef(budgetToEdit.work_order_ref || '');
       setBValidUntil(budgetToEdit.valid_until || '');
       setBClient(budgetToEdit.client || '');
       setBCif(budgetToEdit.client_cif || '');
       setBAddress(budgetToEdit.address || '');
       
-      // Buscar cliente en CRM para rellenar los datos extra
-      const foundClient = crmClients.find(c => c.name === budgetToEdit.client || (c.company && `${c.name} (${c.company})` === budgetToEdit.client) || c.cif === budgetToEdit.client_cif);
+      const foundClient = crmClients.find(c => 
+        c.name === budgetToEdit.client || 
+        (c.company && `${c.name} (${c.company})` === budgetToEdit.client) || 
+        c.cif === budgetToEdit.client_cif
+      );
       setBClientId(foundClient ? foundClient.id : null);
       setBEmail(foundClient?.email || foundClient?.admin_email || '');
       setBPhone(foundClient?.phone || foundClient?.company_phone || '');
@@ -196,7 +197,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       setBBankAccount(foundClient?.bank_account || '');
       
       setBItems(budgetToEdit.items && budgetToEdit.items.length > 0 ? budgetToEdit.items : [{ desc: '', qty: 1, price: 0 }]);
-      setShowAdvancedClientFields(false); // Colapsado por defecto para vista rápida
+      setShowAdvancedClientFields(false); 
     } else {
       resetBudgetForm();
     }
@@ -251,13 +252,12 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
             const data = await response.json();
 
-            // Mapeo inteligente con el CRM después del escaneo
             let foundClient = null;
             if (data.client_name) {
               foundClient = crmClients.find(c => 
-                c.name?.toLowerCase().includes(data.client_name.toLowerCase()) || 
-                (c.company && c.company.toLowerCase().includes(data.client_name.toLowerCase())) ||
-                (data.client_phone && c.phone && c.phone.includes(data.client_phone))
+                String(c.name || '').toLowerCase().includes(String(data.client_name).toLowerCase()) || 
+                (c.company && String(c.company).toLowerCase().includes(String(data.client_name).toLowerCase())) ||
+                (data.client_phone && c.phone && String(c.phone).includes(String(data.client_phone)))
               );
             }
 
@@ -290,7 +290,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               setBItems(parsedItems);
             }
 
-            // Desplegar datos si la IA extrajo algo extra para que el usuario lo vea
             if (data.client_address || data.client_bank || data.client_contact) {
               setShowAdvancedClientFields(true);
             }
@@ -322,9 +321,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     
     if (val.trim().length > 0) {
       setFilteredSuggestions(crmClients.filter(c => 
-        (c.name && c.name.toLowerCase().includes(val.toLowerCase())) || 
-        (c.company && c.company.toLowerCase().includes(val.toLowerCase())) ||
-        (c.phone && c.phone.includes(val))
+        (c.name && String(c.name).toLowerCase().includes(val.toLowerCase())) || 
+        (c.company && String(c.company).toLowerCase().includes(val.toLowerCase())) ||
+        (c.phone && String(c.phone).includes(val))
       ));
       setShowSuggestions(true);
     } else {
@@ -334,7 +333,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
   const handleSelectSuggestion = (cli: any) => {
     setBClientId(cli.id);
-    setBClient(cli.company ? `${cli.name} (${cli.company})` : cli.name); 
+    setBClient(cli.company ? `${cli.name} (${cli.company})` : cli.name || ''); 
     setBCif(cli.cif || cli.company_cif || ''); 
     setBAddress(cli.address || ''); 
     setBEmail(cli.email || cli.admin_email || ''); 
@@ -344,20 +343,16 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setShowSuggestions(false);
   };
 
-  const getFilteredCatalog = (desc: string) => desc.trim() ? catalogItems.filter(c => c.description.toLowerCase().includes(desc.toLowerCase())) : [];
+  const getFilteredCatalog = (desc: string) => desc.trim() ? catalogItems.filter(c => c.description && String(c.description).toLowerCase().includes(desc.toLowerCase())) : [];
   const handleAddItemRow = () => setBItems(prev => [...prev, { desc: '', qty: 1, price: 0 }]);
   const calculatedSubtotal = bItems.reduce((acc, item) => acc + (Number(item.qty) || 0) * (Number(item.price) || 0), 0);
   const calculatedTotal = calculatedSubtotal * 1.21;
 
-  // =========================================================================
-  // GUARDAR PRESUPUESTO + ACTUALIZAR FICHA CRM
-  // =========================================================================
   const handleSaveBudget = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       let finalClientId = bClientId;
 
-      // 1. Guardado en el CRM
       if (!bClientId && bClient.trim() !== '') {
         const newClientPayload = {
           name: bClient, cif: bCif, address: bAddress, email: bEmail, phone: bPhone, admin_contact: bContact, bank_account: bBankAccount, user_id: user.id
@@ -370,7 +365,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       } else if (bClientId) {
         const original = crmClients.find(c => c.id === bClientId);
         if (original) {
-          const originalName = original.company ? `${original.name} (${original.company})` : original.name;
+          const originalName = original.company ? `${original.name} (${original.company})` : (original.name || '');
           const originalCif = original.cif || original.company_cif || '';
           const originalAddress = original.address || '';
           const originalEmail = original.email || original.admin_email || '';
@@ -400,7 +395,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         }
       }
 
-      // 2. Guardado del Presupuesto (Insertar o Actualizar)
       const budgetPayload = {
         code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
         subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, pdf_name: `${bCode}.pdf`, items: bItems, 
@@ -451,6 +445,313 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       await supabase.from('budgets').update({ status: 'rechazado' }).eq('id', id);
       setBudgets(prev => prev.map(b => b.id === id ? { ...b, status: 'rechazado' } : b));
     } catch (err: any) { alert('Error: ' + err.message); }
+  };
+
+  const generateNextInvoiceCode = () => {
+    const invoices = budgets.filter(b => b.type === 'factura' || (b.code && String(b.code).startsWith('FAC-')));
+    let nextNum = userProfile?.invoice_start_num || 1;
+    if (invoices.length > 0) {
+      const maxExisting = Math.max(...invoices.map(i => {
+        const m = String(i.code).match(/FAC-\d{4}-(\d+)/);
+        return m ? parseInt(m[1], 10) : 0;
+      }));
+      if (maxExisting >= nextNum) nextNum = maxExisting + 1;
+    }
+    return `FAC-${new Date().getFullYear()}-${String(nextNum).padStart(4, '0')}`;
+  };
+
+  const handleOpenInvoiceModal = (budget: any) => {
+    setInvoiceModal({ show: true, budget, percentage: 100 });
+  };
+
+  const handleConfirmInvoice = async () => {
+    const { budget, percentage } = invoiceModal;
+    try {
+      const newCode = generateNextInvoiceCode();
+      const pct = percentage / 100;
+      const newSubtotal = Number(budget.subtotal) * pct;
+      const newVat = Number(budget.vat) * pct;
+      const newTotal = Number(budget.total) * pct;
+      
+      if (percentage === 100) {
+        const { error } = await supabase.from('budgets').update({ code: newCode, type: 'factura', status: 'pendiente_cobro' }).eq('id', budget.id);
+        if (error) throw error;
+        setBudgets(prev => prev.map(b => b.id === budget.id ? { ...b, code: newCode, type: 'factura', status: 'pendiente_cobro' } : b));
+      } else {
+        const newItems = [{ desc: `Facturación parcial (Anticipo ${percentage}%) de ${budget.code}`, qty: 1, price: newSubtotal }];
+        const { data: newFactura, error } = await supabase.from('budgets').insert([{
+          code: newCode, client: budget.client, client_cif: budget.client_cif, address: budget.address,
+          work_order_ref: budget.work_order_ref || '',
+          subtotal: newSubtotal, vat: newVat, total: newTotal, pdf_name: `${newCode}.pdf`,
+          items: newItems, user_id: user.id, status: 'pendiente_cobro', type: 'factura', parent_id: budget.id
+        }]).select();
+
+        if (error) throw error;
+        await supabase.from('budgets').update({ status: 'parcialmente_facturado' }).eq('id', budget.id);
+        setBudgets(prev => {
+          const updated = prev.map(b => b.id === budget.id ? { ...b, status: 'parcialmente_facturado' } : b);
+          return [newFactura[0], ...updated];
+        });
+      }
+
+      alert(`Factura generada con éxito (${newCode}).`);
+      setInvoiceModal({ show: false, budget: null, percentage: 100 });
+      setDocTab('facturas');
+    } catch (err: any) { alert('Error al facturar: ' + err.message); }
+  };
+
+  const handleOpenRestInvoiceModal = (budget: any) => {
+    const relatedInvoices = budgets.filter(b => b.type === 'factura' && b.parent_id === budget.id);
+    const alreadyInvoicedSubtotal = relatedInvoices.reduce((acc, inv) => acc + Number(inv.subtotal), 0);
+    setRestInvoiceModal({ show: true, budget, items: [...(budget.items || [])], alreadyInvoicedSubtotal, activeItemIndex: null });
+  };
+
+  const handleConfirmRestInvoice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { budget, items, alreadyInvoicedSubtotal } = restInvoiceModal;
+    try {
+      const newCode = generateNextInvoiceCode();
+      const currentSubtotal = items.reduce((acc, item) => acc + (Number(item.qty) || 0) * (Number(item.price) || 0), 0);
+      const finalSubtotal = currentSubtotal - alreadyInvoicedSubtotal;
+      const finalVat = finalSubtotal * 0.21;
+      const finalTotal = finalSubtotal + finalVat;
+
+      const finalItems = [...items, { desc: `Descuento Anticipo ya facturado (${budget.code})`, qty: 1, price: -alreadyInvoicedSubtotal }];
+
+      const { data: newFactura, error } = await supabase.from('budgets').insert([{
+        code: newCode, client: budget.client, client_cif: budget.client_cif, address: budget.address,
+        work_order_ref: budget.work_order_ref || '',
+        subtotal: finalSubtotal, vat: finalVat, total: finalTotal, pdf_name: `${newCode}.pdf`,
+        items: finalItems, user_id: user.id, status: 'pendiente_cobro', type: 'factura', parent_id: budget.id
+      }]).select();
+
+      if (error) throw error;
+
+      await supabase.from('budgets').update({ status: 'facturado', items: items, subtotal: currentSubtotal, vat: currentSubtotal*0.21, total: currentSubtotal*1.21 }).eq('id', budget.id);
+
+      setBudgets(prev => {
+        const updated = prev.map(b => b.id === budget.id ? { ...b, status: 'facturado', items: items, subtotal: currentSubtotal, vat: currentSubtotal*0.21, total: currentSubtotal*1.21 } : b);
+        return [newFactura[0], ...updated];
+      });
+
+      alert(`Factura final de obra generada con éxito (${newCode}).`);
+      setRestInvoiceModal({ show: false, budget: null, items: [], alreadyInvoicedSubtotal: 0, activeItemIndex: null });
+      setDocTab('facturas');
+    } catch (err: any) { alert('Error al facturar el resto: ' + err.message); }
+  };
+
+  const checkSequentialIntegrity = (code: string) => {
+    const invoices = budgets.filter(doc => doc.type === 'factura' || (doc.code && String(doc.code).startsWith('FAC-')));
+    const maxNum = Math.max(...invoices.map(i => { const m = String(i.code).match(/FAC-\d{4}-(\d+)/); return m ? parseInt(m[1], 10) : 0; }));
+    const currentMatch = String(code).match(/FAC-\d{4}-(\d+)/);
+    const currentNum = currentMatch ? parseInt(currentMatch[1], 10) : 0;
+    return { isLast: currentNum === maxNum, maxNum };
+  };
+
+  const handleRevertToBudget = async (b: any) => {
+    const integrity = checkSequentialIntegrity(b.code);
+    if (!integrity.isLast) {
+      alert(`⚠️ CORRELATIVIDAD: Solo puedes devolver a presupuesto la ÚLTIMA factura generada (nº ${integrity.maxNum}).`);
+      return;
+    }
+
+    if (!confirm(`¿Devolver la factura ${b.code} a estado de Presupuesto?`)) return;
+    try {
+      if (b.parent_id) {
+        await supabase.from('budgets').delete().eq('id', b.id);
+        await supabase.from('budgets').update({ status: 'pendiente' }).eq('id', b.parent_id);
+        setBudgets(prev => prev.filter(doc => doc.id !== b.id).map(doc => doc.id === b.parent_id ? { ...doc, status: 'pendiente' } : doc));
+      } else {
+        const revertedCode = String(b.code).replace('FAC-', 'PRE-');
+        await supabase.from('budgets').update({ type: 'presupuesto', code: revertedCode, status: 'pendiente' }).eq('id', b.id);
+        setBudgets(prev => prev.map(doc => doc.id === b.id ? { ...doc, type: 'presupuesto', code: revertedCode, status: 'pendiente' } : doc));
+      }
+      alert('Documento devuelto a Presupuesto limpiamente.');
+      setDocTab('presupuestos');
+    } catch (err: any) { alert('Error al revertir: ' + err.message); }
+  };
+
+  const handleDocPressStart = (b: any) => {
+    isDocLongPress.current = false;
+    docPressTimer.current = setTimeout(() => {
+      isDocLongPress.current = true;
+      handleDeleteDocument(b);
+    }, 5000);
+  };
+
+  const handleDocPressEnd = () => {
+    if (docPressTimer.current) clearTimeout(docPressTimer.current);
+  };
+
+  const handleDeleteDocument = async (b: any) => {
+    if (b.type === 'factura') {
+      const integrity = checkSequentialIntegrity(b.code);
+      if (!integrity.isLast) {
+        alert(`⚠️ CORRELATIVIDAD: Solo puedes anular la ÚLTIMA factura generada (nº ${integrity.maxNum}).`);
+        return;
+      }
+    } else {
+      const hasInvoices = budgets.some(doc => doc.type === 'factura' && (doc.parent_id === b.id || doc.id === b.id));
+      if (hasInvoices) {
+        alert('⚠️ NO SE PUEDE ELIMINAR: Este presupuesto ya tiene facturas emitidas. Para borrarlo, primero debes anular o revertir sus facturas.');
+        return;
+      }
+
+      const linkedOrder = workOrders.find(wo => wo.budget_id === b.id);
+      if (linkedOrder) {
+        const hasExpenses = allExpenses.some(exp => exp.work_order_id === linkedOrder.id);
+        const hasAttachments = allAttachments.some(att => att.work_order_id === linkedOrder.id);
+
+        if (hasExpenses || hasAttachments) {
+          alert('⚠️ NO SE PUEDE ELIMINAR: La orden de trabajo vinculada contiene gastos o archivos guardados. Debes eliminar primero todos los apuntes de la obra para poder borrar el presupuesto.');
+          return;
+        }
+      }
+    }
+
+    if (!confirm(`¿Estás seguro de ELIMINAR definitivamente el documento ${b.code}?`)) return;
+    
+    try {
+      if (b.parent_id) {
+         await supabase.from('budgets').update({ status: 'pendiente' }).eq('id', b.parent_id);
+      }
+      if (b.type !== 'factura') {
+         await supabase.from('work_orders').delete().eq('budget_id', b.id);
+      }
+      
+      await supabase.from('budgets').delete().eq('id', b.id);
+      
+      setBudgets(prev => prev.filter(d => d.id !== b.id));
+      setWorkOrders(prev => prev.filter(wo => wo.budget_id !== b.id));
+      
+      calculateStorageSize();
+      alert('Documento eliminado correctamente.');
+    } catch (err: any) { 
+      alert('Error al borrar: ' + err.message); 
+    }
+  };
+
+  const handleOpenPaymentModal = (invoice: any) => {
+    setPaymentModal({ show: true, invoice, method: 'Transferencia Bancaria' });
+  };
+
+  const handleConfirmPayment = async () => {
+    const { invoice, method } = paymentModal;
+    try {
+      await supabase.from('budgets').update({ status: 'cobrada', payment_method: method }).eq('id', invoice.id);
+      setBudgets(prev => prev.map(b => b.id === invoice.id ? { ...b, status: 'cobrada', payment_method: method } : b));
+      setPaymentModal({ show: false, invoice: null, method: 'Transferencia Bancaria' });
+    } catch (err: any) { alert('Error al cobrar: ' + err.message); }
+  };
+
+  const openWorkOrderPanel = async (order: any) => {
+    setActiveWorkOrder(order);
+    setWoTab('info');
+    try {
+      const [resExp, resAtt] = await Promise.all([
+        supabase.from('work_expenses').select('*').eq('work_order_id', order.id),
+        supabase.from('attachments').select('*').eq('work_order_id', order.id)
+      ]);
+      setWoExpenses(resExp?.data || []);
+      setWoAttachments(resAtt?.data || []);
+    } catch (err) {
+      console.error('Error cargando obra:', err);
+      setWoExpenses([]);
+      setWoAttachments([]);
+    }
+  };
+
+  const handleFinishWorkOrder = async (id: string) => {
+    if (!confirm('¿Finalizar orden? Ya no aparecerá en la lista activa.')) return;
+    try {
+      await supabase.from('work_orders').update({ status: 'finalizada' }).eq('id', id);
+      setWorkOrders(prev => prev.map(wo => wo.id === id ? { ...wo, status: 'finalizada' } : wo));
+      setActiveWorkOrder(null);
+    } catch (err: any) { alert('Error: ' + err.message); }
+  };
+
+  const handleAddExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeWorkOrder) return;
+    try {
+      const { data, error } = await supabase.from('work_expenses').insert([{ 
+        work_order_id: activeWorkOrder.id, 
+        description: newExpenseDesc, 
+        amount: Number(newExpenseAmount) 
+      }]).select();
+      
+      if (error) throw error;
+      if (data) {
+        setWoExpenses(prev => [...prev, data[0]]);
+        setAllExpenses(prev => [...prev, data[0]]);
+      }
+      setNewExpenseDesc(''); 
+      setNewExpenseAmount('');
+    } catch (err: any) { alert('Error guardando gasto: ' + err.message); }
+  };
+
+  const handleUploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeWorkOrder) return;
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const cleanClientName = String(activeWorkOrder.client_name || 'Sin_Cliente').replace(/[^a-zA-Z0-9]/g, '_');
+      
+      const filePath = `clientes_crm/${cleanClientName}/proyecto_${activeWorkOrder.budget_id}/archivos_obra/${fileName}`;
+      
+      const { error: uploadError } = await supabase.storage.from('chat_attachments').upload(filePath, file);
+      if (uploadError) throw uploadError;
+      const { data: publicData } = supabase.storage.from('chat_attachments').getPublicUrl(filePath);
+      const { data: attData } = await supabase.from('attachments').insert([{ work_order_id: activeWorkOrder.id, file_name: file.name, file_url: publicData.publicUrl, type: 'archivo' }]).select();
+      if (attData) {
+        setWoAttachments(prev => [...prev, attData[0]]);
+        setAllAttachments(prev => [...prev, attData[0]]);
+      }
+      calculateStorageSize();
+    } catch (err: any) { alert('Error al subir: ' + err.message); }
+  };
+
+  const handleDeleteAttachment = async (id: string) => {
+    if (!confirm('¿Borrar este archivo para liberar espacio en disco?')) return;
+    try {
+      await supabase.from('attachments').delete().eq('id', id);
+      setWoAttachments(prev => prev.filter(a => a.id !== id));
+      setAllAttachments(prev => prev.filter(a => a.id !== id));
+      calculateStorageSize();
+    } catch (err) {}
+  };
+
+  const openNewCrmModal = () => {
+    setCrmForm({ id: null, name: '', phone: '', email: '', cif: '', address: '', street: '', street_number: '', postal_code: '', population: '', city: '', country: 'España', company: '', company_cif: '', company_address: '', company_phone: '', admin_contact: '', admin_email: '', bank_account: '' });
+    setCrmTab('datos'); setShowCrmModal(true);
+  };
+
+  const openEditCrmModal = (client: any) => { 
+    setCrmForm({
+      id: client.id, name: client.name || '', phone: client.phone || '', email: client.email || '', cif: client.cif || '', address: client.address || '',
+      street: client.street || '', street_number: client.street_number || '', postal_code: client.postal_code || '', population: client.population || '', city: client.city || '', country: client.country || 'España',
+      company: client.company || '', company_cif: client.company_cif || '', company_address: client.company_address || '', company_phone: client.company_phone || '', admin_contact: client.admin_contact || '', admin_email: client.admin_email || '', bank_account: client.bank_account || ''
+    });
+    setCrmTab('datos'); setShowCrmModal(true); 
+  };
+
+  const handleSaveCrmClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const gpsAddressParts = [crmForm.street, crmForm.street_number, crmForm.postal_code, crmForm.population, crmForm.city, crmForm.country].filter(Boolean);
+    const finalGpsAddress = gpsAddressParts.join(', ') || crmForm.address;
+    const payload = { ...crmForm, address: finalGpsAddress, user_id: user.id };
+    delete payload.id;
+    try {
+      if (crmForm.id) {
+        const { data } = await supabase.from('clients').update(payload).eq('id', crmForm.id).select();
+        if (data) setCrmClients(prev => prev.map(c => c.id === crmForm.id ? data[0] : c));
+      } else {
+        const { data } = await supabase.from('clients').insert([payload]).select();
+        if (data) setCrmClients(prev => [...prev, data[0]]);
+      }
+      setShowCrmModal(false);
+    } catch (err: any) { alert('Error guardando cliente: ' + err.message); }
   };
 
   const handleSaveCatalogItem = async (e: React.FormEvent) => {
@@ -522,7 +823,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         doc.save(`${docData.code}.pdf`);
       } else {
         const pdfBlob = doc.output('blob');
-        const cleanClientName = (docData.client || 'Sin_Cliente').replace(/[^a-zA-Z0-9]/g, '_');
+        const cleanClientName = String(docData.client || 'Sin_Cliente').replace(/[^a-zA-Z0-9]/g, '_');
         const projectId = docData.parent_id || docData.id;
         const fileName = `clientes_crm/${cleanClientName}/proyecto_${projectId}/${docData.code}.pdf`;
         
@@ -538,11 +839,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         const docName = isFactura ? 'la factura' : 'el presupuesto';
         const message = `Hola! Aquí tienes ${docName} ${docData.code}.\n\nPuedes descargarlo en PDF oficial desde este enlace seguro:\n${pdfUrl}\n\nUn saludo.`;
 
-        const clientData = crmClients.find(c => docData.client.includes(c.name));
+        const clientData = crmClients.find(c => String(docData.client || '').includes(c.name));
         
         if (method === 'whatsapp') {
           let phone = clientData?.phone || clientData?.company_phone || '';
-          phone = phone.replace(/\D/g, ''); 
+          phone = String(phone).replace(/\D/g, ''); 
           const waUrl = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}` : `https://wa.me/?text=${encodeURIComponent(message)}`;
           window.open(waUrl, '_blank');
         } else if (method === 'email') {
@@ -559,13 +860,17 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     }
   };
 
-  const filteredBudgets = budgets.filter(b => docTab === 'presupuestos' ? b.type !== 'factura' && b.code.startsWith('PRE') : b.type === 'factura' || b.code.startsWith('FAC'));
+  const filteredBudgets = budgets.filter(b => docTab === 'presupuestos' ? b.type !== 'factura' && String(b.code || '').startsWith('PRE') : b.type === 'factura' || String(b.code || '').startsWith('FAC'));
   const filteredCrmList = crmClients.filter(c => {
     if (!crmSearchQuery.trim()) return true;
     const q = crmSearchQuery.toLowerCase();
     return (
-      (c.name && c.name.toLowerCase().includes(q)) || (c.phone && c.phone.includes(q)) || (c.company && c.company.toLowerCase().includes(q)) ||
-      (c.cif && c.cif.toLowerCase().includes(q)) || (c.city && c.city.toLowerCase().includes(q)) || (c.population && c.population.toLowerCase().includes(q))
+      (c.name && String(c.name).toLowerCase().includes(q)) || 
+      (c.phone && String(c.phone).includes(q)) || 
+      (c.company && String(c.company).toLowerCase().includes(q)) ||
+      (c.cif && String(c.cif).toLowerCase().includes(q)) || 
+      (c.city && String(c.city).toLowerCase().includes(q)) || 
+      (c.population && String(c.population).toLowerCase().includes(q))
     );
   });
 
@@ -641,7 +946,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               >
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-black text-lg shrink-0">
-                    {client.name.charAt(0)}
+                    {client.name?.charAt(0)}
                   </div>
                   <div className="min-w-0">
                     <h4 className="font-black text-slate-800 text-sm truncate">{client.name}</h4>
@@ -696,7 +1001,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               onTouchEnd={handleDocPressEnd}
               onTouchMove={handleDocPressEnd}
               onClick={() => {
-                // Hacer click abre el modo edición si es presupuesto pendiente
                 if (b.type === 'presupuesto' && (!b.status || b.status === 'pendiente')) {
                   handleOpenAddBudget(b);
                 }
@@ -818,7 +1122,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                     placeholder="Escribe para buscar un cliente existente o escanea un parte..." 
                     value={bClient} 
                     onChange={handleClientInput} 
-                    onFocus={() => bClient.trim() && setShowSuggestions(true)} 
+                    onFocus={() => bClient?.trim() && setShowSuggestions(true)} 
                     onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} 
                     className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 font-bold outline-none transition" 
                   />
@@ -835,7 +1139,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 </div>
 
                 {/* VISTA RÁPIDA (Resumen si está colapsado y hay datos) */}
-                {!showAdvancedClientFields && (bCif || bPhone || bAddress || bEmail || bBankAccount) && (
+                {!showAdvancedClientFields && (bCif || bPhone || bAddress || bEmail || bBankAccount || bContact) && (
                   <div className="text-[10px] text-slate-500 font-medium bg-white p-2.5 rounded border border-slate-200">
                     {bCif && <span className="mr-3"><strong>CIF:</strong> {bCif}</span>}
                     {bPhone && <span className="mr-3"><strong>Tel:</strong> {bPhone}</span>}
@@ -910,6 +1214,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                     <div className="flex gap-2">
                       <div className="w-16"><input type="number" value={item.qty} onChange={e => { const u = [...bItems]; u[index].qty = Number(e.target.value); setBItems(u); }} className="w-full p-2 border border-slate-300 rounded-md text-center font-bold focus:border-indigo-500 focus:outline-none transition" placeholder="Cant." /></div>
                       <div className="w-20 relative"><input type="number" step="0.01" value={item.price} onChange={e => { const u = [...bItems]; u[index].price = Number(e.target.value); setBItems(u); }} className="w-full p-2 border border-slate-300 rounded-md text-right font-bold pr-5 focus:border-indigo-500 focus:outline-none transition" placeholder="Precio" /><span className="absolute right-1.5 top-2 text-slate-400 font-bold">€</span></div>
+                      <button type="button" onClick={() => { const u = [...bItems]; u.splice(index, 1); setBItems(u); }} className="w-8 flex items-center justify-center bg-rose-100 text-rose-600 rounded-md hover:bg-rose-200 transition font-bold">✕</button>
                     </div>
                   </div>
                 ))}
