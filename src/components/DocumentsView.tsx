@@ -159,6 +159,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setShowAddBudgetModal(true);
   };
 
+  // =========================================================================
+  // FUNCIÓN MEJORADA: PREVENCIÓN DE CUELGUES (HEIC + TIMEOUT)
+  // =========================================================================
   const handleScanWorkOrder = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -167,10 +170,18 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     try {
       const reader = new FileReader();
       reader.readAsDataURL(file);
+      
       reader.onload = (event) => {
         const img = new Image();
         img.src = event.target?.result as string;
         
+        // Control de errores de formato en el navegador (Ej: Fotos HEIC de iPhone)
+        img.onerror = () => {
+          alert('❌ El navegador no puede procesar esta foto. Si es un archivo HEIC, por favor haz la foto directamente con la cámara del botón.');
+          setIsScanning(false);
+          e.target.value = '';
+        };
+
         img.onload = async () => {
           try {
             const canvas = document.createElement('canvas');
@@ -184,11 +195,18 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             
             const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
 
+            // Controlador para abortar la petición si tarda más de 25 segundos
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 25000);
+
             const response = await fetch('/api/scan-work-order', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ image: compressedBase64 })
+              body: JSON.stringify({ image: compressedBase64 }),
+              signal: controller.signal
             });
+
+            clearTimeout(timeoutId);
 
             if (!response.ok) {
               let errorMsg = 'Error en el servidor de IA';
@@ -196,7 +214,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 const errorData = await response.json();
                 errorMsg = errorData.error || errorMsg;
               } catch (parseErr) {
-                errorMsg = `Error ${response.status}: Revisa que la API Route exista y no devuelva HTML.`;
+                errorMsg = `Error ${response.status}: Respuesta no válida.`;
               }
               throw new Error(errorMsg);
             }
@@ -219,7 +237,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
             alert('✅ ¡Magia completada! Por favor revisa y ajusta los datos extraídos.');
           } catch (err: any) {
-            alert('❌ La IA detectó un error: ' + err.message);
+            if (err.name === 'AbortError') {
+              alert('❌ Tiempo agotado. La IA tardó demasiado en responder, vuelve a intentarlo.');
+            } else {
+              alert('❌ La IA detectó un error: ' + err.message);
+            }
           } finally {
             setIsScanning(false);
             e.target.value = '';
