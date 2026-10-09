@@ -159,9 +159,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setShowAddBudgetModal(true);
   };
 
-  // =========================================================================
-  // IA SCANNER DE PARTES (COMPRESIÓN DE IMAGEN MEJORADA Y ERRORES CLAROS)
-  // =========================================================================
   const handleScanWorkOrder = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -176,7 +173,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         
         img.onload = async () => {
           try {
-            // 1. Comprimir la foto para que Vercel no la bloquee por ser muy pesada (>4MB)
             const canvas = document.createElement('canvas');
             const MAX_WIDTH = 1000;
             const scaleSize = MAX_WIDTH / img.width;
@@ -186,17 +182,14 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             const ctx = canvas.getContext('2d');
             ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
             
-            // 60% de calidad en JPEG para que pese menos de 1MB
             const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
 
-            // 2. Llamada a nuestro backend
             const response = await fetch('/api/scan-work-order', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ image: compressedBase64 })
             });
 
-            // 3. Capturar errores específicos
             if (!response.ok) {
               let errorMsg = 'Error en el servidor de IA';
               try {
@@ -210,7 +203,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
             const data = await response.json();
 
-            // 4. Rellenar formulario
             if (data.client_name) setBClient(data.client_name);
             if (data.client_address) setBAddress(data.client_address);
             if (data.client_phone) setBPhone(data.client_phone);
@@ -230,7 +222,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             alert('❌ La IA detectó un error: ' + err.message);
           } finally {
             setIsScanning(false);
-            e.target.value = ''; // Reset file input
+            e.target.value = '';
           }
         };
       };
@@ -958,6 +950,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest block">Pendiente de Cobro</span>
                 <span className="font-black text-3xl text-rose-700">{stats.pendiente.toFixed(2)} €</span>
               </div>
+
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
                 <div className="flex justify-between items-center text-xs font-bold">
                   <span className="text-slate-600 flex items-center gap-1.5">💾 Espacio en Disco Utilizado</span>
@@ -971,6 +964,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 </div>
                 <p className="text-[10px] text-slate-400 text-center font-medium">Plan Base Activo. Ampliable a 10 GB / 50 GB.</p>
               </div>
+
             </div>
           </div>
         </div>
@@ -1090,10 +1084,10 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 shrink-0 gap-3">
               <h3 className="font-black text-lg text-slate-800">📄 Creador de Presupuesto</h3>
               <div className="flex items-center gap-2">
-                {/* BOTÓN MÁGICO DE ESCANEAR CON IA */}
+                {/* BOTÓN MÁGICO DE ESCANEAR CON IA SIN CAPTURE ENVIRONMENT */}
                 <label className={`px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-black cursor-pointer hover:bg-emerald-100 transition flex items-center gap-2 shadow-sm ${isScanning ? 'opacity-50 pointer-events-none' : ''}`}>
                   {isScanning ? '⏳ Analizando Imagen...' : '📸 Escanear Parte a Mano'}
-                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleScanWorkOrder} />
+                  <input type="file" accept="image/*" className="hidden" onChange={handleScanWorkOrder} />
                 </label>
                 <button type="button" onClick={() => setShowAddBudgetModal(false)} className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition">✕</button>
               </div>

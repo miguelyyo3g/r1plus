@@ -16,8 +16,8 @@ export async function POST(req: Request) {
       throw new Error("Falta la clave GEMINI_API_KEY en las variables de entorno de Vercel.");
     }
 
-    // AQUÍ ESTÁ EL CAMBIO MÁGICO: Hemos cambiado gemini-1.5-flash por gemini-2.5-flash
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    // AQUÍ ESTÁ EL CAMBIO MÁGICO: Hemos cambiado a gemini-3.8-flash según nos pide Google
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
