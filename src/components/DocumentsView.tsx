@@ -39,13 +39,14 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [bWorkOrderRef, setBWorkOrderRef] = useState('');
   const [bValidUntil, setBValidUntil] = useState('');
   
-  // NUEVO: Control inteligente del cliente
+  // Control inteligente del cliente
   const [bClientId, setBClientId] = useState<string | null>(null);
   const [bClient, setBClient] = useState('');
   const [bCif, setBCif] = useState('');
   const [bAddress, setBAddress] = useState('');
   const [bEmail, setBEmail] = useState('');
   const [bPhone, setBPhone] = useState('');
+  const [bContact, setBContact] = useState(''); // NUEVO CAMPO: Persona de contacto
   const [bItems, setBItems] = useState<Array<{ desc: string; qty: number; price: number }>>([{ desc: '', qty: 1, price: 0 }]);
 
   const [isScanning, setIsScanning] = useState(false);
@@ -164,6 +165,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setBAddress('');
     setBEmail('');
     setBPhone('');
+    setBContact(''); // Resetear campo de contacto
     setBWorkOrderRef('');
     setBValidUntil('');
     setBItems([{ desc: '', qty: 1, price: 0 }]);
@@ -239,11 +241,13 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               setBAddress(foundClient.address || data.client_address || '');
               setBPhone(foundClient.phone || foundClient.company_phone || data.client_phone || '');
               setBEmail(foundClient.email || foundClient.admin_email || '');
+              setBContact(foundClient.admin_contact || data.client_contact || '');
             } else {
               setBClientId(null);
               if (data.client_name) setBClient(data.client_name);
               if (data.client_address) setBAddress(data.client_address);
               if (data.client_phone) setBPhone(data.client_phone);
+              if (data.client_contact) setBContact(data.client_contact);
             }
 
             if (data.work_order_ref) setBWorkOrderRef(data.work_order_ref);
@@ -281,8 +285,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     const val = e.target.value; 
     setBClient(val);
     
-    // Si el usuario escribe manualmente, quitamos el ID para que cuente como cliente nuevo
-    // a menos que seleccione explícitamente uno de la lista de sugerencias.
+    // Si el usuario teclea manualmente, desconectamos el ID para que cuente como cliente nuevo
     setBClientId(null);
     
     if (val.trim().length > 0) {
@@ -304,6 +307,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setBAddress(cli.address || ''); 
     setBEmail(cli.email || cli.admin_email || ''); 
     setBPhone(cli.phone || cli.company_phone || '');
+    setBContact(cli.admin_contact || ''); // Cargar el contacto del CRM
     setShowSuggestions(false);
   };
 
@@ -324,7 +328,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       if (!bClientId && bClient.trim() !== '') {
         // ES UN CLIENTE NUEVO -> Lo creamos automático en el CRM
         const newClientPayload = {
-          name: bClient, cif: bCif, address: bAddress, email: bEmail, phone: bPhone, user_id: user.id
+          name: bClient, cif: bCif, address: bAddress, email: bEmail, phone: bPhone, admin_contact: bContact, user_id: user.id
         };
         const { data: newCli } = await supabase.from('clients').insert([newClientPayload]).select();
         if (newCli) {
@@ -340,9 +344,10 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
           const originalAddress = original.address || '';
           const originalEmail = original.email || original.admin_email || '';
           const originalPhone = original.phone || original.company_phone || '';
+          const originalContact = original.admin_contact || '';
 
-          // Comprobamos si hay alguna diferencia entre lo que había y lo que han tecleado
-          if (bClient !== originalName || bCif !== originalCif || bAddress !== originalAddress || bEmail !== originalEmail || bPhone !== originalPhone) {
+          // Comprobamos si hay alguna diferencia entre lo que había y lo que han tecleado en el formulario
+          if (bClient !== originalName || bCif !== originalCif || bAddress !== originalAddress || bEmail !== originalEmail || bPhone !== originalPhone || bContact !== originalContact) {
             const wantToUpdate = window.confirm('Has modificado los datos de este cliente en el formulario.\n\n¿Quieres guardar estos cambios permanentemente en su ficha del CRM?');
             
             if (wantToUpdate) {
@@ -351,7 +356,8 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 cif: bCif,
                 address: bAddress,
                 email: bEmail,
-                phone: bPhone
+                phone: bPhone,
+                admin_contact: bContact // Guardamos el nuevo contacto en su ficha
               };
               const { data: updatedCli } = await supabase.from('clients').update(updatePayload).eq('id', bClientId).select();
               if (updatedCli) {
@@ -1088,9 +1094,14 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                     <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Teléfono</label>
                     <input type="tel" value={bPhone} onChange={e => setBPhone(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition font-mono" />
                   </div>
-                  <div className="sm:col-span-2">
+                  <div>
                     <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Correo Electrónico</label>
                     <input type="email" value={bEmail} onChange={e => setBEmail(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
+                  </div>
+                  {/* NUEVO CAMPO: Persona de contacto */}
+                  <div>
+                    <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Persona de Contacto</label>
+                    <input type="text" placeholder="Ej. Juan, Marta..." value={bContact} onChange={e => setBContact(e.target.value)} className="w-full p-2.5 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none transition" />
                   </div>
                   <div className="sm:col-span-2">
                     <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Dirección Completa</label>
