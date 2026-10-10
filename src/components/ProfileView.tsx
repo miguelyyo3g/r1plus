@@ -11,29 +11,20 @@ interface ProfileViewProps {
 
 export default function ProfileView({ user }: ProfileViewProps) {
   const [activeTab, setActiveTab] = useState<'datos' | 'planes' | 'equipo'>('datos');
-  
-  // Datos reales del perfil (sincronizados con Supabase)
   const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Estado para el Free que quiere unirse a una empresa
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState('');
-
-  // Estado del gerente (Sus comerciales vinculados)
   const [team, setTeam] = useState<any[]>([]);
 
   // 1. CARGAR DATOS REALES DE SUPABASE
   useEffect(() => {
-    if (user && user.id) {
-      loadProfileData();
-    }
+    if (user && user.id) loadProfileData();
   }, [user]);
 
   const loadProfileData = async () => {
     try {
       setIsLoading(true);
-      // Cargar perfil propio
       const { data: profileData, error } = await supabase
         .from('profiles')
         .select('*')
@@ -42,7 +33,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
       
       if (error) throw error;
 
-      // Si es Gerente (plan PRO o rol supplier_owner), generar código si no tiene
       let currentProfile = profileData;
       if ((currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner') && !currentProfile.company_code) {
         const newCode = 'EMP-' + Math.floor(1000 + Math.random() * 9000);
@@ -52,18 +42,16 @@ export default function ProfileView({ user }: ProfileViewProps) {
 
       setProfile(currentProfile);
 
-      // Si es Gerente, cargar a sus empleados (Los que tengan su ID como organization_id)
       if (currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner') {
         const { data: teamData } = await supabase
           .from('profiles')
           .select('id, name, phone, email, active_modules')
-          .eq('organization_id', user.id); // organization_id guarda el ID del jefe
+          .eq('organization_id', user.id);
         
         if (teamData) {
-          // Formateamos para que active_modules siempre sea un objeto aunque venga nulo
           const formattedTeam = teamData.map(emp => ({
             ...emp,
-            active_modules: emp.active_modules || { crm: false, rutas: false, presupuestos: false }
+            active_modules: emp.active_modules || { crm: false, rutas: false, presupuestos_facturas: false }
           }));
           setTeam(formattedTeam);
         }
@@ -75,7 +63,30 @@ export default function ProfileView({ user }: ProfileViewProps) {
     }
   };
 
-  // 2. LÓGICA DEL FREE PARA UNIRSE A UNA EMPRESA
+  // 2. LÓGICA DE CHECKOUT CON STRIPE
+  const handleCheckout = async (priceId: string) => {
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          priceId: priceId,
+          userEmail: profile.email,
+          userId: user.id
+        })
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert("Error al procesar el pago: " + data.error);
+      }
+    } catch (err) {
+      alert("Error conectando con la pasarela de pago de Stripe.");
+    }
+  };
+
+  // 3. LÓGICA DEL FREE PARA UNIRSE A UNA EMPRESA
   const handleJoinCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     setJoinError('');
@@ -86,7 +97,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
     }
 
     try {
-      // Buscar si existe un gerente con ese código
       const { data: managerData, error: searchError } = await supabase
         .from('profiles')
         .select('id')
@@ -98,28 +108,26 @@ export default function ProfileView({ user }: ProfileViewProps) {
         return;
       }
 
-      // Si existe, nos vinculamos a él
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ 
           organization_id: managerData.id, 
-          role: 'sales_rep' // Automáticamente pasa a ser comercial
+          role: 'sales_rep' 
         })
         .eq('id', user.id);
 
       if (updateError) throw updateError;
 
       alert("¡Vinculación completada! Ahora formas parte de la empresa. Pide a tu gerente que te active los módulos en su panel.");
-      loadProfileData(); // Recargar para ver el cambio de rol
+      loadProfileData(); 
 
     } catch (err: any) {
       setJoinError("Hubo un error al intentar vincularte: " + err.message);
     }
   };
 
-  // 3. LÓGICA DEL GERENTE PARA CAMBIAR PERMISOS
+  // 4. LÓGICA DEL GERENTE PARA CAMBIAR PERMISOS
   const toggleEmployeeModule = async (empId: string, moduleName: string) => {
-    // 1. Actualizar estado local rápido para que la UI no tenga lag
     const updatedTeam = team.map(emp => {
       if (emp.id === empId) {
         return { 
@@ -131,7 +139,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
     });
     setTeam(updatedTeam);
 
-    // 2. Guardar en Supabase en segundo plano
     const employeeToUpdate = updatedTeam.find(e => e.id === empId);
     if (employeeToUpdate) {
       try {
@@ -141,7 +148,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
           .eq('id', empId);
       } catch (err) {
         console.error("Error guardando permisos", err);
-        // Si falla, revertimos
         loadProfileData();
       }
     }
@@ -163,7 +169,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
     return <div className="p-10 text-center font-bold text-slate-500">Cargando perfil...</div>;
   }
 
-  // Comprobar si el usuario es VIP (Pro o Admin)
   const isPro = profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner';
 
   return (
@@ -184,7 +189,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
         </div>
       </div>
 
-      {/* MENÚ DE PESTAÑAS (Sobresale por encima del fondo azul) */}
+      {/* MENÚ DE PESTAÑAS */}
       <div className="px-4 sm:px-6 -mt-10 relative z-10">
         <div className="bg-white rounded-2xl shadow-md p-1.5 flex border border-slate-200">
           <button onClick={() => setActiveTab('datos')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'datos' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👤 Datos</button>
@@ -194,10 +199,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
       </div>
 
       <div className="p-4 sm:p-6 space-y-6 mt-2">
-        
-        {/* ========================================================= */}
         {/* PESTAÑA: MIS DATOS */}
-        {/* ========================================================= */}
         {activeTab === 'datos' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
@@ -223,9 +225,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
           </div>
         )}
 
-        {/* ========================================================= */}
         {/* PESTAÑA: PLANES (PRECIOS) */}
-        {/* ========================================================= */}
         {activeTab === 'planes' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             <div className="text-center mb-6">
@@ -233,7 +233,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
               <p className="text-sm text-slate-500 mt-1">Desbloquea todo el potencial de la plataforma.</p>
             </div>
 
-            {/* Tarjeta Plan Free */}
             <div className={`bg-white p-5 rounded-3xl border-2 transition-all ${profile.plan === 'free' ? 'border-slate-800 shadow-md relative' : 'border-slate-200 opacity-70'}`}>
               {profile.plan === 'free' && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <h4 className="font-black text-xl text-slate-800">Básico (Free)</h4>
@@ -246,7 +245,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
               </ul>
             </div>
 
-            {/* Tarjeta Plan Empresa */}
             <div className={`bg-indigo-50 p-5 rounded-3xl border-2 transition-all ${profile.plan === 'empresa' ? 'border-indigo-600 shadow-md relative' : 'border-indigo-200'}`}>
               {profile.plan === 'empresa' && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <h4 className="font-black text-xl text-indigo-900">Empresa (Individual)</h4>
@@ -260,15 +258,14 @@ export default function ProfileView({ user }: ProfileViewProps) {
               </ul>
               {profile.plan !== 'empresa' && (
                 <button 
-                  onClick={() => window.location.href = 'https://buy.stripe.com/test_AQUI_TU_ENLACE_PRO'} 
-                  className="w-full mt-5 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-md"
+                  onClick={() => handleCheckout('price_1UMVl8AT2HWOK4TeXKB7WisC')} 
+                  className="w-full mt-5 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-md cursor-pointer hover:bg-indigo-700 transition"
                 >
                   Mejorar a Empresa
                 </button>
               )}
             </div>
 
-            {/* Tarjeta Plan Empresa PRO */}
             <div className={`bg-slate-900 p-5 rounded-3xl border-2 transition-all ${isPro ? 'border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.3)] relative' : 'border-slate-800'}`}>
               {isPro && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-slate-900 text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <div className="flex justify-between items-start">
@@ -285,8 +282,8 @@ export default function ProfileView({ user }: ProfileViewProps) {
               </ul>
               {!isPro && (
                 <button 
-                  onClick={() => window.location.href = 'https://buy.stripe.com/test_AQUI_TU_ENLACE_PRO_PLUS'} 
-                  className="w-full mt-5 py-3 bg-amber-400 text-slate-900 font-black rounded-xl shadow-md"
+                  onClick={() => handleCheckout('price_1UMVokAT2HWOK4TepVgZJ6gZ')} 
+                  className="w-full mt-5 py-3 bg-amber-400 text-slate-900 font-black rounded-xl shadow-md cursor-pointer hover:bg-amber-500 transition"
                 >
                   Contratar PRO
                 </button>
@@ -295,9 +292,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
           </div>
         )}
 
-        {/* ========================================================= */}
         {/* PESTAÑA: MI AGENCIA / EQUIPO (VINCULACIÓN) */}
-        {/* ========================================================= */}
         {activeTab === 'equipo' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             
@@ -336,8 +331,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
             {/* VISTA 2: Gerente (Plan Empresa Pro) */}
             {isPro && (
               <div className="space-y-4">
-                
-                {/* Caja de Código de Invitación */}
                 <div className="bg-indigo-600 p-6 rounded-3xl shadow-md text-white text-center relative overflow-hidden">
                   <div className="absolute top-0 right-0 -mr-4 -mt-4 text-7xl opacity-10">🏢</div>
                   <h3 className="font-bold text-indigo-200 text-sm uppercase tracking-widest mb-2">Código de tu Agencia</h3>
@@ -347,7 +340,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
                   <p className="text-xs text-indigo-200 font-medium mt-3">Dale este código a tus comerciales para que vinculen su app gratuita a tu cuenta corporativa.</p>
                 </div>
 
-                {/* Lista de Empleados y Gestión de Módulos */}
                 <div>
                   <div className="flex justify-between items-center mb-3 px-1 mt-6">
                     <h3 className="font-black text-slate-800">Mi Equipo ({team.length})</h3>
@@ -369,23 +361,17 @@ export default function ProfileView({ user }: ProfileViewProps) {
                             </div>
                           </div>
 
-                          {/* Gestión de Permisos por Comercial */}
                           <div>
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Permisos (Interruptores de Módulos)</p>
                             <div className="grid grid-cols-2 gap-2">
-                              {/* Interruptor CRM */}
                               <label className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition">
                                 <span className="text-xs font-bold text-slate-700">👥 CRM</span>
                                 <input type="checkbox" checked={emp.active_modules?.crm || false} onChange={() => toggleEmployeeModule(emp.id, 'crm')} className="w-4 h-4 accent-indigo-600" />
                               </label>
-                              
-                              {/* Interruptor RUTAS */}
                               <label className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition">
                                 <span className="text-xs font-bold text-slate-700">📍 Rutas</span>
                                 <input type="checkbox" checked={emp.active_modules?.rutas || false} onChange={() => toggleEmployeeModule(emp.id, 'rutas')} className="w-4 h-4 accent-indigo-600" />
                               </label>
-
-                              {/* Interruptor PRESUPUESTOS */}
                               <label className="col-span-2 flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition">
                                 <span className="text-xs font-bold text-slate-700">💶 Presupuestos (Full Access)</span>
                                 <input type="checkbox" checked={emp.active_modules?.presupuestos_facturas || false} onChange={() => toggleEmployeeModule(emp.id, 'presupuestos_facturas')} className="w-4 h-4 accent-indigo-600" />
