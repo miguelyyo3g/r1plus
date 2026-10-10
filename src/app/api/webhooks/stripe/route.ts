@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
+// ESTA ES LA LÍNEA MÁGICA: Evita que Vercel rompa el build intentando simular el webhook
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
 <<<<<<< HEAD
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy', {
@@ -62,7 +65,6 @@ export async function POST(req: Request) {
       const userId = session.metadata?.supabaseUserId;
       
       if (!userId) {
-         // Si por lo que sea no hay userId, avisamos a Stripe para que no reintente a lo tonto
          return new NextResponse('No hay userId en metadata', { status: 200 }); 
       }
 
@@ -75,10 +77,13 @@ export async function POST(req: Request) {
       if (priceId === process.env.STRIPE_PRICE_ID_PRO || priceId === 'price_1UMVokAT2HWOK4TepVgZJ6gZ') newPlan = 'empresa_pro';
 
 <<<<<<< HEAD
+<<<<<<< HEAD
       console.log(`✅ Pago completado: Actualizando usuario ${userId} al plan ${newPlan}`);
 
 =======
       // Intentamos actualizar Supabase
+>>>>>>> deploy-v2
+=======
 >>>>>>> deploy-v2
       const { error } = await supabaseAdmin
         .from('profiles')
@@ -89,7 +94,6 @@ export async function POST(req: Request) {
         .eq('id', userId); 
 
       if (error) {
-        // AQUÍ ESTÁ LA TRAMPA: Le mandamos el error real de Supabase a Stripe
         return new NextResponse(`Error interno de Supabase: ${error.message}`, { status: 500 });
       }
     }
@@ -107,7 +111,6 @@ export async function POST(req: Request) {
     return new NextResponse('Webhook procesado con éxito', { status: 200 });
 
   } catch (globalError: any) {
-    // Si el error salta en cualquier otra línea rara, lo capturamos aquí
     return new NextResponse(`Fallo catastrófico (Global): ${globalError.message}`, { status: 500 });
   }
 }
