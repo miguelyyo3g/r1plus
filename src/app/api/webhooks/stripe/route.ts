@@ -1,11 +1,8 @@
-import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
 export async function POST(req: Request) {
-  // 1. Inicializamos las herramientas DENTRO de la petición y con "paracaídas" (fallbacks) 
-  // para que Next.js no colapse durante el comando 'npm run build'
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy', {
     apiVersion: '2025-03-31.basil' as any,
   });
@@ -16,7 +13,9 @@ export async function POST(req: Request) {
   );
 
   const body = await req.text();
-  const signature = headers().get('Stripe-Signature') as string;
+  
+  // EL FIX CLAVE: Leemos la firma directamente de 'req', sin usar next/headers
+  const signature = req.headers.get('stripe-signature') as string;
 
   let event: Stripe.Event;
 
@@ -34,16 +33,18 @@ export async function POST(req: Request) {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object as Stripe.Checkout.Session;
     
-    const customerEmail = session.customer_details?.email;
+    // Recuperamos el ID directamente de la metadata
+    const userId = session.metadata?.supabaseUserId;
+    
     const lineItems = await stripe.checkout.sessions.listLineItems(session.id);
     const priceId = lineItems.data[0]?.price?.id;
 
-    if (customerEmail && priceId) {
+    if (userId && priceId) {
       let newPlan = 'free';
       if (priceId === process.env.STRIPE_PRICE_ID_EMPRESA || priceId === 'price_1UMVl8AT2HWOK4TeXKB7WisC') newPlan = 'empresa';
       if (priceId === process.env.STRIPE_PRICE_ID_PRO || priceId === 'price_1UMVokAT2HWOK4TepVgZJ6gZ') newPlan = 'empresa_pro';
 
-      console.log(`✅ Pago completado: Actualizando ${customerEmail} al plan ${newPlan}`);
+      console.log(`✅ Pago completado: Actualizando usuario ${userId} al plan ${newPlan}`);
 
       const { error } = await supabaseAdmin
         .from('profiles')
@@ -51,7 +52,7 @@ export async function POST(req: Request) {
           plan: newPlan,
           stripe_customer_id: session.customer as string 
         })
-        .eq('email', customerEmail);
+        .eq('id', userId); 
 
       if (error) {
         console.error('❌ Error actualizando Supabase:', error.message);
@@ -68,9 +69,7 @@ export async function POST(req: Request) {
       .from('profiles')
       .update({ plan: 'free' })
       .eq('stripe_customer_id', customerId);
-      
-    console.log(`📉 Suscripción cancelada: Cliente ${customerId} devuelto a Free`);
   }
 
-  return new NextResponse('Webhook recibido y procesado', { status: 200 });
+  return new NextResponse('Webhook procesado', { status: 200 });
 }
