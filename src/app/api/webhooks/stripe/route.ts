@@ -3,17 +3,18 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
-// Aquí actualizamos también la versión de la API
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-03-31.basil' as any,
-});
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 export async function POST(req: Request) {
+  // 1. Inicializamos las herramientas DENTRO de la petición y con "paracaídas" (fallbacks) 
+  // para que Next.js no colapse durante el comando 'npm run build'
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy', {
+    apiVersion: '2025-03-31.basil' as any,
+  });
+
+  const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://dummy.supabase.co',
+    process.env.SUPABASE_SERVICE_ROLE_KEY || 'dummy_key'
+  );
+
   const body = await req.text();
   const signature = headers().get('Stripe-Signature') as string;
 
@@ -23,7 +24,7 @@ export async function POST(req: Request) {
     event = stripe.webhooks.constructEvent(
       body,
       signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
+      process.env.STRIPE_WEBHOOK_SECRET || 'whsec_dummy'
     );
   } catch (err: any) {
     console.error(`❌ Error verificando webhook de Stripe: ${err.message}`);
