@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
+// Aquí actualizamos la versión de la API a la que nos pide Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy', {
-  apiVersion: '2023-10-16' as any,
+  apiVersion: '2025-03-31.basil' as any, 
 });
 
 export async function POST(req: Request) {
@@ -12,7 +13,7 @@ export async function POST(req: Request) {
     const session = await stripe.checkout.sessions.create({
       line_items: [
         {
-          price: priceId, // ID de precio de Stripe (price_...)
+          price: priceId, 
           quantity: 1,
         },
       ],
