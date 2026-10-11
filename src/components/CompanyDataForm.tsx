@@ -1,450 +1,332 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-"use client";
-
-import { useState, useEffect } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-
-export default function CompanyDataForm() {
-  const supabase = createClientComponentClient();
-=======
-CompanyDataForm.tsxCompanyDataForm.tsxCompanyDataForm.tsx"use client";
-=======
 // @ts-nocheck
 /* eslint-disable */
-"use client";
->>>>>>> deploy-v2
+'use client';
 
-import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
+import CompanyDataForm from './CompanyDataForm';
 
-export default function CompanyDataForm() {
->>>>>>> deploy-v2
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [uploadingLogo, setUploadingLogo] = useState(false);
-  const [message, setMessage] = useState("");
+interface ProfileViewProps {
+  user: any;
+}
 
-  const [orgId, setOrgId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    name: "",
-    tax_id: "",
-    address: "",
-    phone: "",
-    logo_url: "",
-    bizum_phone: "",
-  });
-
-  const [bankAccounts, setBankAccounts] = useState<Array<{ bankName: string; iban: string }>>([]);
+export default function ProfileView({ user }: ProfileViewProps) {
+  const [activeTab, setActiveTab] = useState<'datos' | 'planes' | 'equipo'>('datos');
+  const [profile, setProfile] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [joinCode, setJoinCode] = useState('');
+  const [joinError, setJoinError] = useState('');
+  const [team, setTeam] = useState<any[]>([]);
+  
+  const [showCompanyForm, setShowCompanyForm] = useState(false); 
 
   useEffect(() => {
-    async function loadCompanyData() {
-      try {
-        if (typeof window === 'undefined') return;
+    if (user && user.id) loadProfileData();
+  }, [user]);
 
-        const { data: sessionData } = await supabase.auth.getSession();
-        const user = sessionData?.session?.user;
-        if (!user) return;
-
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("organization_id")
-          .eq("id", user.id)
-          .single();
-
-        if (profile?.organization_id) {
-          setOrgId(profile.organization_id);
-
-          const { data: org } = await supabase
-            .from("organizations")
-            .select("*")
-            .eq("id", profile.organization_id)
-            .single();
-
-          if (org) {
-            setFormData({
-              name: org.name || "",
-              tax_id: org.tax_id || "",
-              address: org.address || "",
-              phone: org.phone || "",
-              logo_url: org.logo_url || "",
-              bizum_phone: org.bizum_phone || "",
-            });
-            if (org.bank_accounts && Array.isArray(org.bank_accounts)) {
-              setBankAccounts(org.bank_accounts);
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Error cargando datos de empresa:", error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadCompanyData();
-<<<<<<< HEAD
-  }, [supabase]);
-
-  // Función exclusiva para subir el Logo a Storage
-=======
-  }, []);
-
-<<<<<<< HEAD
-  // Función para subir el Logo a Storage
->>>>>>> deploy-v2
-=======
->>>>>>> deploy-v2
-  const uploadLogo = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const loadProfileData = async () => {
     try {
-      setUploadingLogo(true);
-      setMessage("");
-
-      if (!event.target.files || event.target.files.length === 0) {
-        throw new Error("Debes seleccionar una imagen.");
-      }
-
-      if (!orgId) {
-        throw new Error("No se encontró la empresa para asociar el logo.");
-      }
-
-      const file = event.target.files[0];
-      const fileExt = file.name.split('.').pop();
-<<<<<<< HEAD
-      // Creamos un nombre único para evitar que la caché muestre logos viejos
-      const fileName = `logo-${orgId}-${Date.now()}.${fileExt}`;
-
-      // Subimos el archivo al bucket 'logos'
-=======
-      const fileName = `logo-${orgId}-${Date.now()}.${fileExt}`;
-
->>>>>>> deploy-v2
-      const { error: uploadError } = await supabase.storage
-        .from('logos')
-        .upload(fileName, file, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-<<<<<<< HEAD
-      // Obtenemos la URL pública de la imagen recién subida
-      const { data } = supabase.storage.from('logos').getPublicUrl(fileName);
-
-      // Actualizamos el estado del formulario con la nueva URL
-=======
-      const { data } = supabase.storage.from('logos').getPublicUrl(fileName);
-
->>>>>>> deploy-v2
-      setFormData({ ...formData, logo_url: data.publicUrl });
-      setMessage("✅ Imagen subida. Dale a 'Guardar Ficha' para aplicar los cambios.");
+      setIsLoading(true);
+      const { data: profileData, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
       
-    } catch (error: any) {
-      setMessage(`❌ Error subiendo imagen: ${error.message}`);
+      if (error) throw error;
+
+      let currentProfile = profileData;
+      
+      // Si el usuario es gerente y no tiene organization_id ni company_code, se lo autogeneramos/asociamos
+      if ((currentProfile.plan === 'empresa_pro' || currentProfile.plan === 'empresa' || currentProfile.role === 'admin' || currentProfile.role === 'gerente') && !currentProfile.company_code) {
+        const newCode = 'EMP-' + Math.floor(1000 + Math.random() * 9000);
+        await supabase.from('profiles').update({ company_code: newCode }).eq('id', user.id);
+        currentProfile.company_code = newCode;
+      }
+
+      setProfile(currentProfile);
+
+      if (currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') {
+        const { data: teamData } = await supabase
+          .from('profiles')
+          .select('id, name, phone, email, active_modules')
+          .eq('organization_id', user.id);
+        
+        if (teamData) {
+          const formattedTeam = teamData.map(emp => ({
+            ...emp,
+            active_modules: emp.active_modules || { crm: false, rutas: false, presupuestos_facturas: false }
+          }));
+          setTeam(formattedTeam);
+        }
+      }
+    } catch (err) {
+      console.error("Error cargando perfil:", err);
     } finally {
-      setUploadingLogo(false);
+      setIsLoading(false);
     }
   };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-  // Guardar todos los textos y la URL del logo en la base de datos
-=======
->>>>>>> deploy-v2
-=======
-  const handleAddAccount = () => {
-    setBankAccounts([...bankAccounts, { bankName: "", iban: "" }]);
+  const handleCheckout = async (priceId: string) => {
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          priceId: priceId,
+          userEmail: profile.email,
+          userId: user.id
+        })
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert("Error al procesar el pago: " + data.error);
+      }
+    } catch (err) {
+      alert("Error conectando con la pasarela de pago de Stripe.");
+    }
   };
 
-  const handleRemoveAccount = (index: number) => {
-    const updated = [...bankAccounts];
-    updated.splice(index, 1);
-    setBankAccounts(updated);
-  };
-
->>>>>>> deploy-v2
-  const handleSave = async (e: React.FormEvent) => {
+  const handleJoinCompany = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
-    setMessage("");
+    setJoinError('');
 
-    if (!orgId) return;
-
-    const { error } = await supabase
-      .from("organizations")
-      .update({
-        name: formData.name,
-        tax_id: formData.tax_id,
-        address: formData.address,
-        phone: formData.phone,
-        logo_url: formData.logo_url,
-        bizum_phone: formData.bizum_phone,
-        bank_accounts: bankAccounts,
-      })
-      .eq("id", orgId);
-
-    if (error) {
-      setMessage("❌ Error al guardar los cambios en la base de datos.");
-    } else {
-      setMessage("✅ Ficha de empresa actualizada con éxito.");
+    if (joinCode.length < 5) {
+      setJoinError("El código debe tener al menos 5 caracteres (Ej. EMP-1234)");
+      return;
     }
-    setSaving(false);
+
+    try {
+      const { data: managerData, error: searchError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('company_code', joinCode.toUpperCase())
+        .single();
+
+      if (searchError || !managerData) {
+        setJoinError("No se ha encontrado ninguna empresa con ese código.");
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ 
+          organization_id: managerData.id, 
+          role: 'sales_rep' 
+        })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      alert("¡Vinculación completada! Ahora formas parte de la empresa.");
+      loadProfileData(); 
+
+    } catch (err: any) {
+      setJoinError("Hubo un error al intentar vincularte: " + err.message);
+    }
   };
 
-  if (loading) return <div className="p-4 text-gray-500">Cargando ficha de empresa...</div>;
+  const toggleEmployeeModule = async (empId: string, moduleName: string) => {
+    const updatedTeam = team.map(emp => {
+      if (emp.id === empId) {
+        return { 
+          ...emp, 
+          active_modules: { ...emp.active_modules, [moduleName]: !emp.active_modules[moduleName] } 
+        };
+      }
+      return emp;
+    });
+    setTeam(updatedTeam);
+
+    const employeeToUpdate = updatedTeam.find(e => e.id === empId);
+    if (employeeToUpdate) {
+      try {
+        await supabase
+          .from('profiles')
+          .update({ active_modules: employeeToUpdate.active_modules })
+          .eq('id', empId);
+      } catch (err) {
+        console.error("Error guardando permisos", err);
+        loadProfileData();
+      }
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    try {
+      await supabase.from('profiles').update({
+        name: profile.name,
+        email: profile.email
+      }).eq('id', user.id);
+      alert("Datos personales guardados correctamente.");
+    } catch (e) {
+      alert("Error guardando datos.");
+    }
+  };
+
+  if (isLoading || !profile) {
+    return <div className="p-10 text-center font-bold text-slate-500">Cargando perfil...</div>;
+  }
+
+  const isPro = profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner' || profile.role === 'gerente';
 
   return (
-<<<<<<< HEAD
-    <div className="max-w-2xl mx-auto p-6 bg-white rounded-xl shadow-sm border border-gray-100">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Ficha de la Empresa</h2>
-      
-=======
-    <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> deploy-v2
-=======
-      <h2 className="text-xl font-black text-slate-800 mb-5">Editar Datos y Logotipo</h2>
->>>>>>> deploy-v2
-      <form onSubmit={handleSave} className="space-y-5">
-=======
-      <h2 className="text-xl font-black text-slate-800 mb-5">🏢 Ficha y Datos de Empresa</h2>
-      <form onSubmit={handleSave} className="space-y-6">
->>>>>>> deploy-v2
-        
-        <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-          <div className="flex-shrink-0 w-24 h-24 bg-white border border-gray-300 rounded-lg flex items-center justify-center overflow-hidden">
-            {formData.logo_url ? (
-              <img src={formData.logo_url} alt="Logo Empresa" className="w-full h-full object-contain" />
-            ) : (
-              <span className="text-gray-400 text-sm">Sin logo</span>
-            )}
-          </div>
-          <div className="flex-1 w-full">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Logotipo Corporativo (Presupuestos y Facturas)</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={uploadLogo}
-              disabled={uploadingLogo}
-<<<<<<< HEAD
-<<<<<<< HEAD
-              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-            />
-            {uploadingLogo && <p className="text-xs text-blue-600 mt-2">Subiendo imagen...</p>}
-=======
-              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-            />
-            {uploadingLogo && <p className="text-xs text-indigo-600 mt-2">Subiendo imagen...</p>}
->>>>>>> deploy-v2
-=======
-              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
-            />
-<<<<<<< HEAD
-            {uploadingLogo && <p className="text-xs text-indigo-600 mt-2">Subiendo imagen a Supabase...</p>}
->>>>>>> deploy-v2
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Nombre Comercial / Razón Social</label>
-          <input
-            type="text"
-<<<<<<< HEAD
-<<<<<<< HEAD
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-=======
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
->>>>>>> deploy-v2
-=======
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold"
->>>>>>> deploy-v2
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            required
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">CIF / NIF</label>
-          <input
-            type="text"
-<<<<<<< HEAD
-<<<<<<< HEAD
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-=======
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
->>>>>>> deploy-v2
-=======
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
->>>>>>> deploy-v2
-            value={formData.tax_id}
-            onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Dirección Fiscal</label>
-          <input
-            type="text"
-<<<<<<< HEAD
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-=======
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
->>>>>>> deploy-v2
-            value={formData.address}
-            onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono Central</label>
-          <input
-            type="tel"
-<<<<<<< HEAD
-<<<<<<< HEAD
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-=======
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
->>>>>>> deploy-v2
-=======
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
->>>>>>> deploy-v2
-            value={formData.phone}
-            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-          />
-=======
-            {uploadingLogo && <p className="text-xs text-indigo-600 mt-2">Subiendo imagen...</p>}
-          </div>
-        </div>
-
-        <div className="space-y-4">
+    <div className="bg-slate-50 min-h-full pb-24">
+      {/* CABECERA DE PERFIL */}
+      <div className="bg-indigo-600 px-6 pt-10 pb-20 rounded-b-[40px] shadow-lg relative">
+        <div className="flex justify-between items-start text-white mb-6">
           <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nombre Comercial / Razón Social</label>
-            <input
-              type="text"
-              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-800"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              required
-            />
+            <h2 className="text-3xl font-black">{profile.name}</h2>
+            <p className="text-indigo-200 font-medium text-sm mt-1">{profile.phone}</p>
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">CIF / NIF</label>
-              <input
-                type="text"
-                className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold"
-                value={formData.tax_id}
-                onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Teléfono Central</label>
-              <input
-                type="tel"
-                className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Dirección Fiscal</label>
-            <input
-              type="text"
-              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-              value={formData.address}
-              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Teléfono Bizum (Cobros)</label>
-            <input
-              type="tel"
-              placeholder="+34 600000000"
-              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold"
-              value={formData.bizum_phone}
-              onChange={(e) => setFormData({ ...formData, bizum_phone: e.target.value })}
-            />
+          <div className="bg-white/20 p-3 rounded-2xl backdrop-blur-sm border border-white/30 text-center">
+            <span className="block text-[9px] uppercase font-black tracking-widest text-indigo-100">Plan Actual</span>
+            <span className="block text-lg font-black uppercase">
+              {profile.plan === 'free' ? 'FREE' : profile.plan === 'empresa' ? 'EMPRESA' : 'PRO'}
+            </span>
           </div>
         </div>
+      </div>
 
-        <div className="space-y-3 pt-4 border-t border-slate-200">
-          <div className="flex justify-between items-center">
-            <h3 className="font-black text-slate-800 text-sm">Cuentas Bancarias y IBAN</h3>
-            <button
-              type="button"
-              onClick={handleAddAccount}
-              className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition"
+      {/* MENÚ DE PESTAÑAS */}
+      <div className="px-4 sm:px-6 -mt-10 relative z-10">
+        <div className="bg-white rounded-2xl shadow-md p-1.5 flex border border-slate-200">
+          <button onClick={() => setActiveTab('datos')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'datos' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👤 Datos</button>
+          <button onClick={() => setActiveTab('planes')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'planes' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>💳 Planes</button>
+          <button onClick={() => setActiveTab('equipo')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'equipo' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>🏢 Equipo</button>
+        </div>
+      </div>
+
+      <div className="p-4 sm:p-6 space-y-6 mt-2">
+        {/* PESTAÑA: MIS DATOS */}
+        {activeTab === 'datos' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+            
+            {/* BOTÓN DE ACCESO DIRECTO AL GESTOR DE EMPRESA Y LOGOS */}
+            <button 
+              onClick={() => setShowCompanyForm(true)}
+              className="w-full py-4 bg-indigo-600 text-white font-black rounded-2xl shadow-lg flex items-center justify-center gap-2 hover:bg-indigo-700 transition cursor-pointer text-base"
             >
-              + Añadir Cuenta
+              <span className="text-2xl">🏢</span> Gestionar Datos de Empresa, Logo y Bancos
             </button>
-          </div>
 
-          {bankAccounts.map((acc, index) => (
-            <div key={index} className="flex flex-col sm:flex-row gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-              <input
-                type="text"
-                placeholder="Banco (Ej. BBVA, Santander)"
-                value={acc.bankName}
-                onChange={(e) => {
-                  const updated = [...bankAccounts];
-                  updated[index].bankName = e.target.value;
-                  setBankAccounts(updated);
-                }}
-                className="flex-1 p-2.5 border border-slate-300 rounded-lg text-xs font-bold outline-none"
-              />
-              <input
-                type="text"
-                placeholder="IBAN (ESXX XXXX...)"
-                value={acc.iban}
-                onChange={(e) => {
-                  const updated = [...bankAccounts];
-                  updated[index].iban = e.target.value;
-                  setBankAccounts(updated);
-                }}
-                className="flex-[2] p-2.5 border border-slate-300 rounded-lg text-xs font-mono font-bold outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => handleRemoveAccount(index)}
-                className="px-3 py-2.5 bg-rose-100 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-200 transition"
-              >
-                ✕
-              </button>
+            {/* FORMULARIO DE DATOS PERSONALES */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              <h3 className="font-black text-slate-800 border-b border-slate-100 pb-2">Información Personal</h3>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Nombre Completo</label>
+                <input type="text" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Teléfono</label>
+                <input type="text" readOnly value={profile.phone} className="w-full p-3 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Correo Electrónico</label>
+                <input type="email" value={profile.email || ''} onChange={e => setProfile({...profile, email: e.target.value})} placeholder="tu@email.com" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
+              </div>
+              <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition cursor-pointer">Guardar Datos Personales</button>
             </div>
-          ))}
->>>>>>> deploy-v2
-        </div>
-
-        {message && (
-          <div className={`p-3 rounded-lg text-sm font-medium ${message.includes('❌') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
-            {message}
+            
+            <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 mt-6 cursor-pointer">
+              Cerrar Sesión Completa
+            </button>
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={saving || uploadingLogo}
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-          className="w-full bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-blue-300"
-=======
-          className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-indigo-300"
->>>>>>> deploy-v2
-=======
-          className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-indigo-300 cursor-pointer shadow-md"
->>>>>>> deploy-v2
-=======
-          className="w-full bg-indigo-600 text-white font-black py-3.5 rounded-xl hover:bg-indigo-700 transition-colors disabled:bg-indigo-300 cursor-pointer shadow-md text-sm"
->>>>>>> deploy-v2
-        >
-          {saving ? "Guardando cambios..." : "Guardar Ficha de Empresa"}
-        </button>
-      </form>
+        {/* PESTAÑA: PLANES (PRECIOS) */}
+        {activeTab === 'planes' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+            <div className="text-center mb-6">
+              <h3 className="text-xl font-black text-slate-800">Mejora tu cuenta</h3>
+              <p className="text-sm text-slate-500 mt-1">Desbloquea todo el potencial de la plataforma.</p>
+            </div>
+
+            <div className={`bg-white p-5 rounded-3xl border-2 transition-all ${profile.plan === 'free' ? 'border-slate-800 shadow-md relative' : 'border-slate-200 opacity-70'}`}>
+              {profile.plan === 'free' && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
+              <h4 className="font-black text-xl text-slate-800">Básico (Free)</h4>
+              <p className="text-3xl font-black text-slate-800 my-2">0€ <span className="text-sm text-slate-400 font-medium">/mes</span></p>
+              <ul className="space-y-2 mt-4 text-sm font-medium text-slate-600">
+                <li className="flex items-center gap-2">✅ Chat y Calendario ilimitado</li>
+                <li className="flex items-center gap-2">✅ Módulo de Juegos Recreativos</li>
+              </ul>
+            </div>
+
+            <div className={`bg-indigo-50 p-5 rounded-3xl border-2 transition-all ${profile.plan === 'empresa' ? 'border-indigo-600 shadow-md relative' : 'border-indigo-200'}`}>
+              {profile.plan === 'empresa' && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
+              <h4 className="font-black text-xl text-indigo-900">Empresa (Individual)</h4>
+              <p className="text-3xl font-black text-indigo-700 my-2">29€ <span className="text-sm text-indigo-400 font-medium">/mes</span></p>
+              <ul className="space-y-2 text-sm font-medium text-indigo-800">
+                <li className="flex items-center gap-2">✅ Desbloqueo de todos los Módulos</li>
+                <li className="flex items-center gap-2">✅ Presupuestos y CRM ilimitados</li>
+              </ul>
+              {profile.plan !== 'empresa' && (
+                <button onClick={() => handleCheckout('price_1UMVl8AT2HWOK4TeXKB7WisC')} className="w-full mt-5 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-md cursor-pointer hover:bg-indigo-700 transition">Mejorar a Empresa</button>
+              )}
+            </div>
+
+            <div className={`bg-slate-900 p-5 rounded-3xl border-2 transition-all ${isPro ? 'border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.3)] relative' : 'border-slate-800'}`}>
+              {isPro && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-slate-900 text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
+              <h4 className="font-black text-xl text-white">Empresa PRO</h4>
+              <p className="text-3xl font-black text-white my-2">79€ <span className="text-sm text-slate-400 font-medium">/mes</span></p>
+              <ul className="space-y-2 text-sm font-medium text-slate-300">
+                <li className="flex items-center gap-2 text-amber-400 font-bold">🔗 Vincular Empleados Comerciales</li>
+              </ul>
+              {!isPro && (
+                <button onClick={() => handleCheckout('price_1UMVokAT2HWOK4TepVgZJ6gZ')} className="w-full mt-5 py-3 bg-amber-400 text-slate-900 font-black rounded-xl shadow-md cursor-pointer hover:bg-amber-500 transition">Contratar PRO</button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* PESTAÑA: EQUIPO */}
+        {activeTab === 'equipo' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+            {!isPro ? (
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm text-center relative overflow-hidden">
+                {profile.organization_id ? (
+                  <>
+                    <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">✅</div>
+                    <h3 className="font-black text-xl text-slate-800 mb-2">Cuenta Vinculada</h3>
+                    <p className="text-sm text-slate-500 font-medium">Tu cuenta está vinculada a una Agencia.</p>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="font-black text-xl text-slate-800 mb-2">Únete a tu Empresa</h3>
+                    <form onSubmit={handleJoinCompany}>
+                      <input type="text" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} placeholder="EMP-XXXX" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-center font-black text-2xl tracking-[0.2em] uppercase mb-4" />
+                      <button type="submit" className="w-full py-4 bg-slate-800 text-white rounded-xl font-black shadow-md hover:bg-slate-900 transition cursor-pointer">Solicitar Vinculación</button>
+                    </form>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-indigo-600 p-6 rounded-3xl shadow-md text-white text-center">
+                  <h3 className="font-bold text-indigo-200 text-sm uppercase tracking-widest mb-2">Código de tu Agencia</h3>
+                  <div className="bg-white/20 p-4 rounded-xl border border-white/30 backdrop-blur-sm">
+                    <span className="font-black text-4xl tracking-widest select-all">{profile.company_code}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* MODAL FLOTANTE DE CONFIGURACIÓN DE EMPRESA */}
+      {showCompanyForm && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm overflow-y-auto pt-10 pb-24 px-4 animate-in fade-in">
+          <div className="max-w-2xl mx-auto flex justify-between items-center mb-4">
+            <h2 className="text-xl font-black text-white">Configuración Corporativa</h2>
+            <button onClick={() => setShowCompanyForm(false)} className="px-4 py-2 bg-white text-slate-800 rounded-xl font-bold hover:bg-slate-100 transition cursor-pointer shadow-lg">✕ Cerrar Ficha</button>
+          </div>
+          <CompanyDataForm />
+        </div>
+      )}
+
     </div>
   );
 }
