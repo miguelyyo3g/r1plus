@@ -2,8 +2,8 @@
 /* eslint-disable */
 "use client";
 
-import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
+import React, { useState, useEffect } from "react";
+import { supabase } from "../lib/supabase";
 
 export default function CompanyDataForm() {
   const [isMounted, setIsMounted] = useState(false);
@@ -11,6 +11,7 @@ export default function CompanyDataForm() {
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [message, setMessage] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
 
   const [orgId, setOrgId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -26,50 +27,78 @@ export default function CompanyDataForm() {
 
   useEffect(() => {
     setIsMounted(true);
-    async function loadCompanyData() {
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const user = sessionData?.session?.user;
-        if (!user) return;
-
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("organization_id")
-          .eq("id", user.id)
-          .single();
-
-        if (profile?.organization_id) {
-          setOrgId(profile.organization_id);
-
-          const { data: org } = await supabase
-            .from("organizations")
-            .select("*")
-            .eq("id", profile.organization_id)
-            .single();
-
-          if (org) {
-            setFormData({
-              name: org.name || "",
-              tax_id: org.tax_id || "",
-              address: org.address || "",
-              phone: org.phone || "",
-              logo_url: org.logo_url || "",
-              bizum_phone: org.bizum_phone || "",
-            });
-            if (org.bank_accounts && Array.isArray(org.bank_accounts)) {
-              setBankAccounts(org.bank_accounts);
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Error cargando datos de empresa:", error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
     loadCompanyData();
   }, []);
+
+  async function loadCompanyData() {
+    try {
+      setLoading(true);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const user = sessionData?.session?.user;
+      
+      if (!user) {
+        setErrorMsg("No hay sesión activa.");
+        return;
+      }
+
+      // 1. Buscamos el perfil del usuario para ver si tiene empresa
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("organization_id, plan, role, name")
+        .eq("id", user.id)
+        .single();
+
+      let currentOrgId = profile?.organization_id;
+
+      // 2. AUTO-CREACIÓN: Si no tiene empresa pero es gerente, se la creamos al instante
+      if (!currentOrgId && (profile?.plan === 'empresa' || profile?.plan === 'empresa_pro' || profile?.role === 'admin' || profile?.role === 'gerente' || profile?.role === 'supplier_owner')) {
+         const { data: newOrg, error: orgError } = await supabase
+           .from("organizations")
+           .insert([{ name: `Empresa de ${profile.name || 'Usuario'}` }])
+           .select("id")
+           .single();
+
+         if (newOrg?.id) {
+           currentOrgId = newOrg.id;
+           await supabase.from("profiles").update({ organization_id: currentOrgId }).eq("id", user.id);
+         }
+      }
+
+      // 3. Cargamos los datos de la empresa para rellenar el formulario
+      if (currentOrgId) {
+        setOrgId(currentOrgId);
+        const { data: org } = await supabase
+          .from("organizations")
+          .select("*")
+          .eq("id", currentOrgId)
+          .single();
+
+        if (org) {
+          setFormData({
+            name: org.name || "",
+            tax_id: org.tax_id || "",
+            address: org.address || "",
+            phone: org.phone || "",
+            logo_url: org.logo_url || "",
+            bizum_phone: org.bizum_phone || "",
+          });
+          
+          if (org.bank_accounts && Array.isArray(org.bank_accounts)) {
+            setBankAccounts(org.bank_accounts);
+          } else if (typeof org.bank_accounts === 'string') {
+            try { setBankAccounts(JSON.parse(org.bank_accounts)); } catch(e) {}
+          }
+        }
+      } else {
+         setErrorMsg("Tu cuenta actual es de tipo Comercial (Free). Solo los gerentes pueden editar los datos de facturación de la agencia.");
+      }
+    } catch (error: any) {
+      console.error("Error cargando datos de empresa:", error);
+      setErrorMsg("No se pudieron cargar los datos de la empresa. Verifica tu conexión.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const uploadLogo = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
@@ -144,40 +173,60 @@ export default function CompanyDataForm() {
     setSaving(false);
   };
 
-  if (!isMounted || loading) return <div className="p-4 text-gray-500">Cargando ficha de empresa...</div>;
+  if (!isMounted) return null;
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-10 bg-white rounded-2xl shadow-sm border border-slate-100">
+        <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3"></div>
+        <p className="text-slate-500 font-bold text-sm">Cargando datos de facturación...</p>
+      </div>
+    );
+  }
+
+  if (errorMsg) {
+    return (
+      <div className="p-6 bg-rose-50 border border-rose-200 rounded-2xl text-center">
+        <div className="text-4xl mb-2">🔒</div>
+        <h3 className="font-black text-rose-800 mb-1">Acceso Restringido</h3>
+        <p className="text-sm text-rose-600 font-medium">{errorMsg}</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-      <h2 className="text-xl font-black text-slate-800 mb-5">🏢 Ficha y Datos de Empresa</h2>
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
       <form onSubmit={handleSave} className="space-y-6">
         
-        <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-          <div className="flex-shrink-0 w-24 h-24 bg-white border border-gray-300 rounded-lg flex items-center justify-center overflow-hidden">
+        {/* LOGO */}
+        <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
+          <div className="flex-shrink-0 w-24 h-24 bg-white border border-slate-300 rounded-xl flex items-center justify-center overflow-hidden shadow-sm">
             {formData.logo_url ? (
               <img src={formData.logo_url} alt="Logo Empresa" className="w-full h-full object-contain" />
             ) : (
-              <span className="text-gray-400 text-sm">Sin logo</span>
+              <span className="text-slate-400 text-xs font-bold uppercase tracking-widest text-center px-2">Sin Logo</span>
             )}
           </div>
           <div className="flex-1 w-full">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Logotipo Corporativo (Presupuestos y Facturas)</label>
+            <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-widest">Logotipo Corporativo</label>
             <input
               type="file"
               accept="image/*"
               onChange={uploadLogo}
               disabled={uploadingLogo}
-              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
+              className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-black file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer transition"
             />
-            {uploadingLogo && <p className="text-xs text-indigo-600 mt-2">Subiendo imagen...</p>}
+            {uploadingLogo && <p className="text-xs text-indigo-600 mt-2 font-bold animate-pulse">Subiendo imagen...</p>}
           </div>
         </div>
 
+        {/* DATOS FISCALES */}
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nombre Comercial / Razón Social</label>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Nombre Comercial / Razón Social</label>
             <input
               type="text"
-              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-800"
+              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-800"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               required
@@ -186,19 +235,19 @@ export default function CompanyDataForm() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">CIF / NIF</label>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">CIF / NIF</label>
               <input
                 type="text"
-                className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold text-slate-800"
                 value={formData.tax_id}
                 onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Teléfono Central</label>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Teléfono Central</label>
               <input
                 type="tel"
-                className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold text-slate-800"
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
               />
@@ -206,41 +255,51 @@ export default function CompanyDataForm() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Dirección Fiscal</label>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Dirección Fiscal</label>
             <input
               type="text"
-              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-800"
               value={formData.address}
               onChange={(e) => setFormData({ ...formData, address: e.target.value })}
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Teléfono Bizum (Cobros)</label>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Teléfono Bizum (Cobros)</label>
             <input
               type="tel"
               placeholder="+34 600000000"
-              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold"
+              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold text-slate-800"
               value={formData.bizum_phone}
               onChange={(e) => setFormData({ ...formData, bizum_phone: e.target.value })}
             />
           </div>
         </div>
 
-        <div className="space-y-3 pt-4 border-t border-slate-200">
-          <div className="flex justify-between items-center">
-            <h3 className="font-black text-slate-800 text-sm">Cuentas Bancarias y IBAN</h3>
+        {/* CUENTAS BANCARIAS */}
+        <div className="space-y-3 pt-6 border-t border-slate-100">
+          <div className="flex justify-between items-center mb-2">
+            <div>
+              <h3 className="font-black text-slate-800 text-sm">Cuentas Bancarias e IBAN</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Para transferencias de clientes</p>
+            </div>
             <button
               type="button"
               onClick={handleAddAccount}
-              className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition"
+              className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-black hover:bg-indigo-100 transition cursor-pointer shadow-sm"
             >
               + Añadir Cuenta
             </button>
           </div>
 
+          {bankAccounts.length === 0 && (
+            <div className="p-4 bg-slate-50 rounded-xl border border-dashed border-slate-300 text-center text-xs font-bold text-slate-400">
+              No tienes ninguna cuenta bancaria configurada.
+            </div>
+          )}
+
           {bankAccounts.map((acc, index) => (
-            <div key={index} className="flex flex-col sm:flex-row gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+            <div key={index} className="flex flex-col sm:flex-row gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 relative group">
               <input
                 type="text"
                 placeholder="Banco (Ej. BBVA, Santander)"
@@ -250,7 +309,7 @@ export default function CompanyDataForm() {
                   updated[index].bankName = e.target.value;
                   setBankAccounts(updated);
                 }}
-                className="flex-1 p-2.5 border border-slate-300 rounded-lg text-xs font-bold outline-none"
+                className="flex-1 p-3 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-indigo-500 text-slate-800"
               />
               <input
                 type="text"
@@ -261,12 +320,13 @@ export default function CompanyDataForm() {
                   updated[index].iban = e.target.value;
                   setBankAccounts(updated);
                 }}
-                className="flex-[2] p-2.5 border border-slate-300 rounded-lg text-xs font-mono font-bold outline-none"
+                className="flex-[2] p-3 bg-white border border-slate-200 rounded-lg text-sm font-mono font-bold outline-none focus:border-indigo-500 text-slate-800 uppercase"
               />
               <button
                 type="button"
                 onClick={() => handleRemoveAccount(index)}
-                className="px-3 py-2.5 bg-rose-100 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-200 transition"
+                title="Eliminar cuenta"
+                className="px-4 py-3 bg-rose-50 text-rose-600 rounded-lg text-sm font-black hover:bg-rose-100 transition cursor-pointer"
               >
                 ✕
               </button>
@@ -275,7 +335,7 @@ export default function CompanyDataForm() {
         </div>
 
         {message && (
-          <div className={`p-3 rounded-lg text-sm font-medium ${message.includes('❌') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+          <div className={`p-4 rounded-xl text-sm font-bold ${message.includes('❌') ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'}`}>
             {message}
           </div>
         )}
@@ -283,9 +343,9 @@ export default function CompanyDataForm() {
         <button
           type="submit"
           disabled={saving || uploadingLogo}
-          className="w-full bg-indigo-600 text-white font-black py-3.5 rounded-xl hover:bg-indigo-700 transition-colors disabled:bg-indigo-300 cursor-pointer shadow-md text-sm"
+          className="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 transition-colors disabled:bg-slate-300 cursor-pointer shadow-lg text-sm mt-4"
         >
-          {saving ? "Guardando cambios..." : "Guardar Ficha de Empresa"}
+          {saving ? "Guardando cambios de empresa..." : "Guardar Ficha de Empresa"}
         </button>
       </form>
     </div>
