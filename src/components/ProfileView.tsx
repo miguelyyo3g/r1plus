@@ -203,8 +203,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
         {/* PESTAÑA: MIS DATOS */}
         {activeTab === 'datos' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-            
-            {/* 1. INFORMACIÓN PERSONAL */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <h3 className="font-black text-slate-800 border-b border-slate-100 pb-2">Información Personal</h3>
               <div>
@@ -219,14 +217,14 @@ export default function ProfileView({ user }: ProfileViewProps) {
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Correo Electrónico</label>
                 <input type="email" value={profile.email || ''} onChange={e => setProfile({...profile, email: e.target.value})} placeholder="tu@email.com" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
               </div>
-              <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition">Guardar Cambios Personales</button>
+              <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition">Guardar Cambios</button>
             </div>
 
-            {/* 2. FICHA Y CONFIGURACIÓN CORPORATIVA (LOGO, CIF, BIZUM, CUENTAS BANCARIAS) */}
+            {/* FORMULARIO DE EMPRESA Y FACTURACIÓN */}
             <div className="pt-2">
               <div className="mb-3 px-1">
                 <h3 className="font-black text-slate-800 text-base">Ficha de Empresa y Facturación</h3>
-                <p className="text-xs text-slate-500">Estos datos y el logotipo aparecerán automáticamente en tus presupuestos y facturas en PDF.</p>
+                <p className="text-xs text-slate-500">Datos corporativos, logotipo, Bizum y cuentas bancarias para tus PDFs.</p>
               </div>
               <CompanyDataForm />
             </div>
