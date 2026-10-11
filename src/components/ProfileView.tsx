@@ -11,16 +11,21 @@ interface ProfileViewProps {
 }
 
 export default function ProfileView({ user }: ProfileViewProps) {
-  const [activeTab, setActiveTab] = useState<'datos' | 'planes' | 'equipo'>('datos');
+  const [isMounted, setIsMounted] = useState(false);
+  const [activeTab, setActiveTab] = useState<'datos' | 'empresa' | 'planes' | 'equipo'>('datos');
   const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState('');
   const [team, setTeam] = useState<any[]>([]);
 
-  // 1. CARGAR DATOS REALES DE SUPABASE
   useEffect(() => {
-    if (user && user.id) loadProfileData();
+    setIsMounted(true);
+    if (user && user.id) {
+      loadProfileData();
+    } else {
+      setIsLoading(false);
+    }
   }, [user]);
 
   const loadProfileData = async () => {
@@ -32,18 +37,34 @@ export default function ProfileView({ user }: ProfileViewProps) {
         .eq('id', user.id)
         .single();
       
-      if (error) throw error;
-
       let currentProfile = profileData;
-      if ((currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner') && !currentProfile.company_code) {
+
+      // BLINDAJE: Si el perfil no existe en la base de datos, creamos uno por defecto en memoria para no bloquear la app
+      if (error || !currentProfile) {
+        console.warn("Perfil no encontrado, usando fallback en memoria", error);
+        currentProfile = {
+          id: user.id,
+          name: user.email?.split('@')[0] || 'Usuario',
+          email: user.email,
+          phone: '',
+          plan: 'free',
+          role: 'sales_rep',
+          organization_id: null
+        };
+      }
+
+      // Autogenerar código de empresa si es gerente/admin y no tiene
+      if ((currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') && !currentProfile.company_code) {
         const newCode = 'EMP-' + Math.floor(1000 + Math.random() * 9000);
-        await supabase.from('profiles').update({ company_code: newCode }).eq('id', user.id);
+        // Intentamos guardarlo, pero si falla no bloqueamos
+        await supabase.from('profiles').update({ company_code: newCode }).eq('id', user.id).catch(() => {});
         currentProfile.company_code = newCode;
       }
 
       setProfile(currentProfile);
 
-      if (currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner') {
+      // Cargar equipo si tiene permisos
+      if (currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') {
         const { data: teamData } = await supabase
           .from('profiles')
           .select('id, name, phone, email, active_modules')
@@ -58,13 +79,20 @@ export default function ProfileView({ user }: ProfileViewProps) {
         }
       }
     } catch (err) {
-      console.error("Error cargando perfil:", err);
+      console.error("Error crítico cargando perfil:", err);
+      // Última red de seguridad
+      setProfile({
+        id: user?.id,
+        name: user?.email?.split('@')[0] || 'Usuario',
+        email: user?.email,
+        plan: 'free',
+        role: 'sales_rep'
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
-  // 2. LÓGICA DE CHECKOUT CON STRIPE
   const handleCheckout = async (priceId: string) => {
     try {
       const res = await fetch('/api/checkout', {
@@ -72,8 +100,8 @@ export default function ProfileView({ user }: ProfileViewProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           priceId: priceId,
-          userEmail: profile.email,
-          userId: user.id
+          userEmail: profile?.email,
+          userId: user?.id
         })
       });
       const data = await res.json();
@@ -87,7 +115,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
     }
   };
 
-  // 3. LÓGICA DEL FREE PARA UNIRSE A UNA EMPRESA
   const handleJoinCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     setJoinError('');
@@ -119,7 +146,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
 
       if (updateError) throw updateError;
 
-      alert("¡Vinculación completada! Ahora formas parte de la empresa. Pide a tu gerente que te active los módulos en su panel.");
+      alert("¡Vinculación completada! Ahora formas parte de la empresa.");
       loadProfileData(); 
 
     } catch (err: any) {
@@ -127,7 +154,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
     }
   };
 
-  // 4. LÓGICA DEL GERENTE PARA CAMBIAR PERMISOS
   const toggleEmployeeModule = async (empId: string, moduleName: string) => {
     const updatedTeam = team.map(emp => {
       if (emp.id === empId) {
@@ -166,11 +192,16 @@ export default function ProfileView({ user }: ProfileViewProps) {
     }
   };
 
-  if (isLoading || !profile) {
+  if (!isMounted || isLoading) {
     return <div className="p-10 text-center font-bold text-slate-500">Cargando perfil...</div>;
   }
 
-  const isPro = profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner';
+  // Prevención de cuelgue si profile sigue siendo nulo
+  if (!profile) {
+    return <div className="p-10 text-center font-bold text-red-500">Error cargando perfil. Por favor, recarga la página.</div>;
+  }
+
+  const isPro = profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner' || profile.role === 'gerente';
 
   return (
     <div className="bg-slate-50 min-h-full pb-24">
@@ -178,8 +209,8 @@ export default function ProfileView({ user }: ProfileViewProps) {
       <div className="bg-indigo-600 px-6 pt-10 pb-20 rounded-b-[40px] shadow-lg relative">
         <div className="flex justify-between items-start text-white mb-6">
           <div>
-            <h2 className="text-3xl font-black">{profile.name}</h2>
-            <p className="text-indigo-200 font-medium text-sm mt-1">{profile.phone}</p>
+            <h2 className="text-3xl font-black">{profile.name || 'Usuario'}</h2>
+            <p className="text-indigo-200 font-medium text-sm mt-1">{profile.phone || profile.email}</p>
           </div>
           <div className="bg-white/20 p-3 rounded-2xl backdrop-blur-sm border border-white/30 text-center">
             <span className="block text-[9px] uppercase font-black tracking-widest text-indigo-100">Plan Actual</span>
@@ -192,41 +223,33 @@ export default function ProfileView({ user }: ProfileViewProps) {
 
       {/* MENÚ DE PESTAÑAS */}
       <div className="px-4 sm:px-6 -mt-10 relative z-10">
-        <div className="bg-white rounded-2xl shadow-md p-1.5 flex border border-slate-200">
-          <button onClick={() => setActiveTab('datos')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'datos' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👤 Datos</button>
-          <button onClick={() => setActiveTab('planes')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'planes' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>💳 Planes</button>
-          <button onClick={() => setActiveTab('equipo')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'equipo' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>🏢 Equipo</button>
+        <div className="bg-white rounded-2xl shadow-md p-1.5 flex border border-slate-200 overflow-x-auto no-scrollbar">
+          <button onClick={() => setActiveTab('datos')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'datos' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👤 Datos</button>
+          <button onClick={() => setActiveTab('empresa')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'empresa' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>🏢 Empresa</button>
+          <button onClick={() => setActiveTab('planes')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'planes' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>💳 Planes</button>
+          <button onClick={() => setActiveTab('equipo')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'equipo' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👥 Equipo</button>
         </div>
       </div>
 
       <div className="p-4 sm:p-6 space-y-6 mt-2">
-        {/* PESTAÑA: MIS DATOS */}
+        {/* PESTAÑA: MIS DATOS PERSONALES */}
         {activeTab === 'datos' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <h3 className="font-black text-slate-800 border-b border-slate-100 pb-2">Información Personal</h3>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Nombre Completo</label>
-                <input type="text" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
+                <input type="text" value={profile.name || ''} onChange={e => setProfile({...profile, name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Teléfono</label>
-                <input type="text" readOnly value={profile.phone} className="w-full p-3 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-500 outline-none" />
+                <input type="text" readOnly value={profile.phone || ''} className="w-full p-3 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-500 outline-none" />
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Correo Electrónico</label>
                 <input type="email" value={profile.email || ''} onChange={e => setProfile({...profile, email: e.target.value})} placeholder="tu@email.com" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
               </div>
-              <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition">Guardar Cambios</button>
-            </div>
-
-            {/* FORMULARIO DE EMPRESA Y FACTURACIÓN */}
-            <div className="pt-2">
-              <div className="mb-3 px-1">
-                <h3 className="font-black text-slate-800 text-base">Ficha de Empresa y Facturación</h3>
-                <p className="text-xs text-slate-500">Datos corporativos, logotipo, Bizum y cuentas bancarias para tus PDFs.</p>
-              </div>
-              <CompanyDataForm />
+              <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition cursor-pointer">Guardar Cambios Personales</button>
             </div>
             
             <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 mt-6 cursor-pointer">
@@ -235,7 +258,19 @@ export default function ProfileView({ user }: ProfileViewProps) {
           </div>
         )}
 
-        {/* PESTAÑA: PLANES (PRECIOS) */}
+        {/* PESTAÑA: EMPRESA Y FACTURACIÓN */}
+        {activeTab === 'empresa' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+            <div className="mb-2 px-1">
+              <h3 className="font-black text-slate-800 text-lg">Configuración de Empresa</h3>
+              <p className="text-xs text-slate-500">Administra el logotipo, CIF, dirección, cuentas bancarias y Bizum que saldrán impresos en tus presupuestos y facturas en PDF.</p>
+            </div>
+            {/* AQUÍ SE RENDERIZA EL FORMULARIO DE EMPRESA PERFECTAMENTE AISLADO */}
+            <CompanyDataForm />
+          </div>
+        )}
+
+        {/* PESTAÑA: PLANES (PRECIOS Y DESCRIPCIONES DETALLADAS) */}
         {activeTab === 'planes' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             <div className="text-center mb-6">
@@ -243,39 +278,42 @@ export default function ProfileView({ user }: ProfileViewProps) {
               <p className="text-sm text-slate-500 mt-1">Desbloquea todo el potencial de la plataforma.</p>
             </div>
 
+            {/* PLAN FREE */}
             <div className={`bg-white p-5 rounded-3xl border-2 transition-all ${profile.plan === 'free' ? 'border-slate-800 shadow-md relative' : 'border-slate-200 opacity-70'}`}>
               {profile.plan === 'free' && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <h4 className="font-black text-xl text-slate-800">Básico (Free)</h4>
               <p className="text-3xl font-black text-slate-800 my-2">0€ <span className="text-sm text-slate-400 font-medium">/mes</span></p>
               <ul className="space-y-2 mt-4 text-sm font-medium text-slate-600">
-                <li className="flex items-center gap-2">✅ Chat y Calendario ilimitado</li>
-                <li className="flex items-center gap-2">✅ Módulo de Juegos Recreativos</li>
-                <li className="flex items-center gap-2 opacity-50">❌ Módulos de Gestión bloqueados</li>
-                <li className="flex items-center gap-2 opacity-50">❌ Límites en Presupuestos y CRM</li>
+                <li className="flex items-center gap-2">✅ Acceso al Chat y Agenda</li>
+                <li className="flex items-center gap-2">✅ Unirse a una empresa existente (Comerciales)</li>
+                <li className="flex items-center gap-2 opacity-50">❌ Módulos de Gestión (CRM, Rutas) bloqueados</li>
+                <li className="flex items-center gap-2 opacity-50">❌ Creación de Presupuestos bloqueada</li>
               </ul>
             </div>
 
+            {/* PLAN EMPRESA */}
             <div className={`bg-indigo-50 p-5 rounded-3xl border-2 transition-all ${profile.plan === 'empresa' ? 'border-indigo-600 shadow-md relative' : 'border-indigo-200'}`}>
               {profile.plan === 'empresa' && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <h4 className="font-black text-xl text-indigo-900">Empresa (Individual)</h4>
               <p className="text-3xl font-black text-indigo-700 my-2">29€ <span className="text-sm text-indigo-400 font-medium">/mes</span></p>
               <p className="text-xs text-indigo-600 font-bold mb-4 bg-white/50 inline-block px-2 py-1 rounded">Ideal para 1 autónomo o gerente</p>
               <ul className="space-y-2 text-sm font-medium text-indigo-800">
-                <li className="flex items-center gap-2">✅ Todo lo de Free ilimitado</li>
                 <li className="flex items-center gap-2 font-bold text-indigo-900">🔓 Desbloqueo de todos los Módulos</li>
-                <li className="flex items-center gap-2">✅ Presupuestos y CRM ilimitados</li>
-                <li className="flex items-center gap-2 opacity-50">❌ Sin vinculación de comerciales</li>
+                <li className="flex items-center gap-2">✅ Gestor de Presupuestos y Facturas ilimitado</li>
+                <li className="flex items-center gap-2">✅ CRM, Clientes y Rutas activos</li>
+                <li className="flex items-center gap-2 opacity-50">❌ Sin posibilidad de vincular equipo comercial</li>
               </ul>
               {profile.plan !== 'empresa' && (
                 <button 
                   onClick={() => handleCheckout('price_1UMVl8AT2HWOK4TeXKB7WisC')} 
                   className="w-full mt-5 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-md cursor-pointer hover:bg-indigo-700 transition"
                 >
-                  Mejorar a Empresa
+                  Mejorar a Empresa (29€/mes)
                 </button>
               )}
             </div>
 
+            {/* PLAN PRO */}
             <div className={`bg-slate-900 p-5 rounded-3xl border-2 transition-all ${isPro ? 'border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.3)] relative' : 'border-slate-800'}`}>
               {isPro && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-slate-900 text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <div className="flex justify-between items-start">
@@ -283,71 +321,44 @@ export default function ProfileView({ user }: ProfileViewProps) {
                 <span className="text-2xl">🚀</span>
               </div>
               <p className="text-3xl font-black text-white my-2">79€ <span className="text-sm text-slate-400 font-medium">/mes</span></p>
-              <p className="text-xs text-amber-400 font-bold mb-4">La solución total para agencias</p>
+              <p className="text-xs text-amber-400 font-bold mb-4">La solución total para agencias y equipos</p>
               <ul className="space-y-2 text-sm font-medium text-slate-300">
-                <li className="flex items-center gap-2">✅ Todo lo del Plan Empresa</li>
-                <li className="flex items-center gap-2 text-amber-400 font-bold">🔗 Vincular Empleados Comerciales</li>
-                <li className="flex items-center gap-2">🕹️ Gestor de Permisos de Módulos</li>
-                <li className="flex items-center gap-2 text-xs italic">+15€/mes por cada licencia extra de comercial</li>
+                <li className="flex items-center gap-2">✅ Todo lo incluido en el Plan Empresa</li>
+                <li className="flex items-center gap-2 text-amber-400 font-bold">🔗 Código para vincular Empleados Comerciales</li>
+                <li className="flex items-center gap-2">🕹️ Panel de Gestión de Permisos por empleado</li>
+                <li className="flex items-center gap-2 text-xs italic">+15€/mes por cada licencia extra de comercial activo</li>
               </ul>
               {!isPro && (
                 <button 
                   onClick={() => handleCheckout('price_1UMVokAT2HWOK4TepVgZJ6gZ')} 
                   className="w-full mt-5 py-3 bg-amber-400 text-slate-900 font-black rounded-xl shadow-md cursor-pointer hover:bg-amber-500 transition"
                 >
-                  Contratar PRO
+                  Contratar Empresa PRO (79€/mes)
                 </button>
               )}
             </div>
           </div>
         )}
 
-        {/* PESTAÑA: MI AGENCIA / EQUIPO (VINCULACIÓN) */}
+        {/* PESTAÑA: EQUIPO Y PERMISOS */}
         {activeTab === 'equipo' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-            
-            {/* VISTA 1: Usuario FREE o Empleado (Ya vinculado) */}
-            {!isPro && (
-              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm text-center relative overflow-hidden">
-                {profile.organization_id ? (
-                  <>
-                    <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">✅</div>
-                    <h3 className="font-black text-xl text-slate-800 mb-2">Cuenta Vinculada</h3>
-                    <p className="text-sm text-slate-500 font-medium">Tu cuenta está vinculada a una Agencia. Tu gerente gestiona los módulos a los que tienes acceso.</p>
-                  </>
-                ) : (
-                  <>
-                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">🔗</div>
-                    <h3 className="font-black text-xl text-slate-800 mb-2">Únete a tu Empresa</h3>
-                    <p className="text-sm text-slate-500 font-medium mb-6">Si trabajas para una agencia, pídele a tu gerente su <strong>Código de Equipo</strong> e introdúcelo aquí. Tus módulos se desbloquearán automáticamente.</p>
-                    
-                    {joinError && <div className="text-rose-500 text-xs font-bold mb-4 bg-rose-50 p-2 rounded">{joinError}</div>}
-                    
-                    <form onSubmit={handleJoinCompany}>
-                      <input 
-                        type="text" 
-                        value={joinCode}
-                        onChange={e => setJoinCode(e.target.value.toUpperCase())}
-                        placeholder="EMP-XXXX" 
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-center font-black text-2xl tracking-[0.2em] focus:outline-none focus:border-indigo-500 uppercase mb-4" 
-                      />
-                      <button type="submit" className="w-full py-4 bg-slate-800 text-white rounded-xl font-black shadow-md hover:bg-slate-900 transition cursor-pointer">Solicitar Vinculación</button>
-                    </form>
-                  </>
-                )}
+            {!isPro ? (
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm text-center">
+                <h3 className="font-black text-xl text-slate-800 mb-2">Únete a tu Empresa</h3>
+                {joinError && <div className="text-rose-500 text-xs font-bold mb-4 bg-rose-50 p-2 rounded">{joinError}</div>}
+                <form onSubmit={handleJoinCompany}>
+                  <input type="text" value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} placeholder="EMP-XXXX" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-center font-black text-2xl tracking-[0.2em] uppercase mb-4" />
+                  <button type="submit" className="w-full py-4 bg-slate-800 text-white rounded-xl font-black shadow-md hover:bg-slate-900 transition cursor-pointer">Solicitar Vinculación</button>
+                </form>
               </div>
-            )}
-
-            {/* VISTA 2: Gerente (Plan Empresa Pro) */}
-            {isPro && (
+            ) : (
               <div className="space-y-4">
-                <div className="bg-indigo-600 p-6 rounded-3xl shadow-md text-white text-center relative overflow-hidden">
-                  <div className="absolute top-0 right-0 -mr-4 -mt-4 text-7xl opacity-10">🏢</div>
+                <div className="bg-indigo-600 p-6 rounded-3xl shadow-md text-white text-center">
                   <h3 className="font-bold text-indigo-200 text-sm uppercase tracking-widest mb-2">Código de tu Agencia</h3>
                   <div className="bg-white/20 p-4 rounded-xl border border-white/30 backdrop-blur-sm">
                     <span className="font-black text-4xl tracking-widest select-all">{profile.company_code}</span>
                   </div>
-                  <p className="text-xs text-indigo-200 font-medium mt-3">Dale este código a tus comerciales para que vinculen su app gratuita a tu cuenta corporativa.</p>
                 </div>
 
                 <div>
@@ -364,10 +375,10 @@ export default function ProfileView({ user }: ProfileViewProps) {
                       team.map(emp => (
                         <div key={emp.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-4">
                           <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-                            <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-black">{emp.name?.charAt(0)}</div>
+                            <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-black">{emp.name?.charAt(0) || 'U'}</div>
                             <div>
-                              <div className="font-black text-slate-800 text-sm">{emp.name}</div>
-                              <div className="text-xs font-mono text-slate-500">{emp.phone}</div>
+                              <div className="font-black text-slate-800 text-sm">{emp.name || 'Usuario'}</div>
+                              <div className="text-xs font-mono text-slate-500">{emp.email}</div>
                             </div>
                           </div>
 
@@ -393,7 +404,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
                     )}
                   </div>
                 </div>
-
               </div>
             )}
           </div>
