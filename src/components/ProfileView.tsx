@@ -6,7 +6,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import dynamic from 'next/dynamic';
 
-// BLINDAJE PARA VERCEL: Obligamos a que el formulario de empresa solo se renderice en el cliente
 const CompanyDataForm = dynamic(() => import('./CompanyDataForm'), { 
   ssr: false,
   loading: () => <div className="p-4 text-center text-slate-500 font-bold">Cargando gestor de empresa...</div>
@@ -27,22 +26,21 @@ export default function ProfileView({ user }: ProfileViewProps) {
 
   useEffect(() => {
     setIsMounted(true);
-    // Llamamos siempre a la función, que ahora es a prueba de fallos
     loadProfileData();
-  }, [user]);
+    // 🔴 LA CLAVE: El array vacío [] evita el bucle infinito si el componente padre cambia
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); 
 
   const loadProfileData = async () => {
     try {
       setIsLoading(true);
 
-      // Si el componente padre no nos pasa el user.id, lo buscamos nosotros mismos en la sesión actual
       let currentUserId = user?.id;
       if (!currentUserId) {
         const { data: sessionData } = await supabase.auth.getSession();
         currentUserId = sessionData?.session?.user?.id;
       }
 
-      // Si definitivamente no hay usuario logueado, cargamos un perfil por defecto para no bloquear la pantalla
       if (!currentUserId) {
         setProfile({
           id: 'invitado',
@@ -76,7 +74,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
         };
       }
 
-      // Autogenerar código de empresa si es necesario
       if ((currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') && !currentProfile.company_code) {
         const newCode = 'EMP-' + Math.floor(1000 + Math.random() * 9000);
         await supabase.from('profiles').update({ company_code: newCode }).eq('id', currentUserId).catch(() => {});
@@ -85,7 +82,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
 
       setProfile(currentProfile);
 
-      // Cargar equipo
       if (currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') {
         const { data: teamData } = await supabase
           .from('profiles')
@@ -102,7 +98,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
       }
     } catch (err) {
       console.error("Error crítico cargando perfil:", err);
-      // Failsafe absoluto
       setProfile({ id: user?.id || 'error', name: 'Usuario', plan: 'free', role: 'sales_rep' });
     } finally {
       setIsLoading(false);
@@ -276,12 +271,11 @@ export default function ProfileView({ user }: ProfileViewProps) {
               <h3 className="font-black text-slate-800 text-lg">Configuración de Empresa</h3>
               <p className="text-xs text-slate-500">Administra el logotipo, CIF, dirección, cuentas bancarias y Bizum que saldrán impresos en tus presupuestos y facturas en PDF.</p>
             </div>
-            {/* COMPONENTE SEGURO RENDERIZADO SOLO EN CLIENTE */}
             <CompanyDataForm />
           </div>
         )}
 
-        {/* PESTAÑA: PLANES CON EXPLICACIONES COMPLETAS */}
+        {/* PESTAÑA: PLANES */}
         {activeTab === 'planes' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             <div className="text-center mb-6">
