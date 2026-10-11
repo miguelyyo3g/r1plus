@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
 export default function CompanyDataForm() {
+  const [isMounted, setIsMounted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -24,10 +25,9 @@ export default function CompanyDataForm() {
   const [bankAccounts, setBankAccounts] = useState<Array<{ bankName: string; iban: string }>>([]);
 
   useEffect(() => {
+    setIsMounted(true);
     async function loadCompanyData() {
       try {
-        if (typeof window === 'undefined') return;
-
         const { data: sessionData } = await supabase.auth.getSession();
         const user = sessionData?.session?.user;
         if (!user) return;
@@ -144,7 +144,7 @@ export default function CompanyDataForm() {
     setSaving(false);
   };
 
-  if (loading) return <div className="p-4 text-gray-500">Cargando ficha de empresa...</div>;
+  if (!isMounted || loading) return <div className="p-4 text-gray-500">Cargando ficha de empresa...</div>;
 
   return (
     <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-100 p-6">
