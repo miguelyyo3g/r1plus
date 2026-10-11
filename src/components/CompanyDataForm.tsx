@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 "use client";
 
 import { useState, useEffect } from "react";
@@ -8,9 +9,14 @@ export default function CompanyDataForm() {
   const supabase = createClientComponentClient();
 =======
 CompanyDataForm.tsxCompanyDataForm.tsxCompanyDataForm.tsx"use client";
+=======
+// @ts-nocheck
+/* eslint-disable */
+"use client";
+>>>>>>> deploy-v2
 
 import { useState, useEffect } from "react";
-import { supabase } from '../lib/supabase'; // <-- Usamos tu conexión existente
+import { supabase } from "@/lib/supabase";
 
 export default function CompanyDataForm() {
 >>>>>>> deploy-v2
@@ -28,11 +34,11 @@ export default function CompanyDataForm() {
     logo_url: "",
   });
 
-  // Cargar datos de la empresa
   useEffect(() => {
     async function loadCompanyData() {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: sessionData } = await supabase.auth.getSession();
+        const user = sessionData?.session?.user;
         if (!user) return;
 
         const { data: profile } = await supabase
@@ -61,7 +67,7 @@ export default function CompanyDataForm() {
           }
         }
       } catch (error) {
-        console.error("Error cargando datos:", error);
+        console.error("Error cargando datos de empresa:", error);
       } finally {
         setLoading(false);
       }
@@ -75,7 +81,10 @@ export default function CompanyDataForm() {
 =======
   }, []);
 
+<<<<<<< HEAD
   // Función para subir el Logo a Storage
+>>>>>>> deploy-v2
+=======
 >>>>>>> deploy-v2
   const uploadLogo = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
@@ -165,10 +174,13 @@ export default function CompanyDataForm() {
       
 =======
     <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+<<<<<<< HEAD
+>>>>>>> deploy-v2
+=======
+      <h2 className="text-xl font-black text-slate-800 mb-5">Editar Datos y Logotipo</h2>
 >>>>>>> deploy-v2
       <form onSubmit={handleSave} className="space-y-5">
         
-        {/* Selector de Logo Visual */}
         <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
           <div className="flex-shrink-0 w-24 h-24 bg-white border border-gray-300 rounded-lg flex items-center justify-center overflow-hidden">
             {formData.logo_url ? (
@@ -178,12 +190,13 @@ export default function CompanyDataForm() {
             )}
           </div>
           <div className="flex-1 w-full">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Logotipo de la empresa</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Logotipo de la empresa (PDFs)</label>
             <input
               type="file"
               accept="image/*"
               onChange={uploadLogo}
               disabled={uploadingLogo}
+<<<<<<< HEAD
 <<<<<<< HEAD
               className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
             />
@@ -193,18 +206,26 @@ export default function CompanyDataForm() {
             />
             {uploadingLogo && <p className="text-xs text-indigo-600 mt-2">Subiendo imagen...</p>}
 >>>>>>> deploy-v2
+=======
+              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
+            />
+            {uploadingLogo && <p className="text-xs text-indigo-600 mt-2">Subiendo imagen a Supabase...</p>}
+>>>>>>> deploy-v2
           </div>
         </div>
 
-        {/* Nombre */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Nombre Comercial / Razón Social</label>
           <input
             type="text"
 <<<<<<< HEAD
+<<<<<<< HEAD
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
 =======
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+>>>>>>> deploy-v2
+=======
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold"
 >>>>>>> deploy-v2
             value={formData.name}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -212,22 +233,24 @@ export default function CompanyDataForm() {
           />
         </div>
 
-        {/* CIF / NIF */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">CIF / NIF</label>
           <input
             type="text"
 <<<<<<< HEAD
+<<<<<<< HEAD
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
 =======
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+>>>>>>> deploy-v2
+=======
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
 >>>>>>> deploy-v2
             value={formData.tax_id}
             onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
           />
         </div>
 
-        {/* Dirección */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Dirección Fiscal</label>
           <input
@@ -242,15 +265,18 @@ export default function CompanyDataForm() {
           />
         </div>
 
-        {/* Teléfono */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono Central</label>
           <input
             type="tel"
 <<<<<<< HEAD
+<<<<<<< HEAD
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
 =======
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+>>>>>>> deploy-v2
+=======
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
 >>>>>>> deploy-v2
             value={formData.phone}
             onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
@@ -267,9 +293,13 @@ export default function CompanyDataForm() {
           type="submit"
           disabled={saving || uploadingLogo}
 <<<<<<< HEAD
+<<<<<<< HEAD
           className="w-full bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-blue-300"
 =======
           className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-indigo-300"
+>>>>>>> deploy-v2
+=======
+          className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-indigo-300 cursor-pointer shadow-md"
 >>>>>>> deploy-v2
         >
           {saving ? "Guardando..." : "Guardar Ficha de Empresa"}
