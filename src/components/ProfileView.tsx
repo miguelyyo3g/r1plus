@@ -4,7 +4,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import CompanyDataForm from './CompanyDataForm';
+import dynamic from 'next/dynamic';
+
+// BLINDAJE PARA VERCEL: Obligamos a que el formulario de empresa solo se renderice en el cliente
+const CompanyDataForm = dynamic(() => import('./CompanyDataForm'), { 
+  ssr: false,
+  loading: () => <div className="p-4 text-center text-slate-500 font-bold">Cargando gestor de empresa...</div>
+});
 
 interface ProfileViewProps {
   user: any;
@@ -12,11 +18,7 @@ interface ProfileViewProps {
 
 export default function ProfileView({ user }: ProfileViewProps) {
   const [isMounted, setIsMounted] = useState(false);
-<<<<<<< HEAD
-  const [activeTab, setActiveTab] = useState<'datos' | 'planes' | 'equipo'>('datos');
-=======
   const [activeTab, setActiveTab] = useState<'datos' | 'empresa' | 'planes' | 'equipo'>('datos');
->>>>>>> deploy-v2
   const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [joinCode, setJoinCode] = useState('');
@@ -25,37 +27,48 @@ export default function ProfileView({ user }: ProfileViewProps) {
 
   useEffect(() => {
     setIsMounted(true);
-<<<<<<< HEAD
-    if (user && user.id) loadProfileData();
-=======
-    if (user && user.id) {
-      loadProfileData();
-    } else {
-      setIsLoading(false);
-    }
->>>>>>> deploy-v2
+    // Llamamos siempre a la función, que ahora es a prueba de fallos
+    loadProfileData();
   }, [user]);
 
   const loadProfileData = async () => {
     try {
       setIsLoading(true);
+
+      // Si el componente padre no nos pasa el user.id, lo buscamos nosotros mismos en la sesión actual
+      let currentUserId = user?.id;
+      if (!currentUserId) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        currentUserId = sessionData?.session?.user?.id;
+      }
+
+      // Si definitivamente no hay usuario logueado, cargamos un perfil por defecto para no bloquear la pantalla
+      if (!currentUserId) {
+        setProfile({
+          id: 'invitado',
+          name: 'Usuario',
+          email: '',
+          plan: 'free',
+          role: 'sales_rep',
+          organization_id: null
+        });
+        setIsLoading(false);
+        return;
+      }
+
       const { data: profileData, error } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', user.id)
+        .eq('id', currentUserId)
         .single();
       
       let currentProfile = profileData;
-<<<<<<< HEAD
-=======
 
-      // BLINDAJE: Si el perfil no existe en la base de datos, creamos uno por defecto en memoria para no bloquear la app
       if (error || !currentProfile) {
-        console.warn("Perfil no encontrado, usando fallback en memoria", error);
         currentProfile = {
-          id: user.id,
-          name: user.email?.split('@')[0] || 'Usuario',
-          email: user.email,
+          id: currentUserId,
+          name: user?.email?.split('@')[0] || 'Usuario',
+          email: user?.email,
           phone: '',
           plan: 'free',
           role: 'sales_rep',
@@ -63,26 +76,21 @@ export default function ProfileView({ user }: ProfileViewProps) {
         };
       }
 
-      // Autogenerar código de empresa si es gerente/admin y no tiene
->>>>>>> deploy-v2
+      // Autogenerar código de empresa si es necesario
       if ((currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') && !currentProfile.company_code) {
         const newCode = 'EMP-' + Math.floor(1000 + Math.random() * 9000);
-        // Intentamos guardarlo, pero si falla no bloqueamos
-        await supabase.from('profiles').update({ company_code: newCode }).eq('id', user.id).catch(() => {});
+        await supabase.from('profiles').update({ company_code: newCode }).eq('id', currentUserId).catch(() => {});
         currentProfile.company_code = newCode;
       }
 
       setProfile(currentProfile);
 
-<<<<<<< HEAD
-=======
-      // Cargar equipo si tiene permisos
->>>>>>> deploy-v2
+      // Cargar equipo
       if (currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') {
         const { data: teamData } = await supabase
           .from('profiles')
           .select('id, name, phone, email, active_modules')
-          .eq('organization_id', user.id);
+          .eq('organization_id', currentUserId);
         
         if (teamData) {
           const formattedTeam = teamData.map(emp => ({
@@ -94,14 +102,8 @@ export default function ProfileView({ user }: ProfileViewProps) {
       }
     } catch (err) {
       console.error("Error crítico cargando perfil:", err);
-      // Última red de seguridad
-      setProfile({
-        id: user?.id,
-        name: user?.email?.split('@')[0] || 'Usuario',
-        email: user?.email,
-        plan: 'free',
-        role: 'sales_rep'
-      });
+      // Failsafe absoluto
+      setProfile({ id: user?.id || 'error', name: 'Usuario', plan: 'free', role: 'sales_rep' });
     } finally {
       setIsLoading(false);
     }
@@ -112,11 +114,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          priceId: priceId,
-          userEmail: profile?.email,
-          userId: user?.id
-        })
+        body: JSON.stringify({ priceId: priceId, userEmail: profile?.email, userId: profile?.id })
       });
       const data = await res.json();
       if (data.url) {
@@ -152,17 +150,13 @@ export default function ProfileView({ user }: ProfileViewProps) {
 
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ 
-          organization_id: managerData.id, 
-          role: 'sales_rep' 
-        })
-        .eq('id', user.id);
+        .update({ organization_id: managerData.id, role: 'sales_rep' })
+        .eq('id', profile.id);
 
       if (updateError) throw updateError;
 
       alert("¡Vinculación completada! Ahora formas parte de la empresa.");
       loadProfileData(); 
-
     } catch (err: any) {
       setJoinError("Hubo un error al intentar vincularte: " + err.message);
     }
@@ -171,10 +165,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
   const toggleEmployeeModule = async (empId: string, moduleName: string) => {
     const updatedTeam = team.map(emp => {
       if (emp.id === empId) {
-        return { 
-          ...emp, 
-          active_modules: { ...emp.active_modules, [moduleName]: !emp.active_modules[moduleName] } 
-        };
+        return { ...emp, active_modules: { ...emp.active_modules, [moduleName]: !emp.active_modules[moduleName] } };
       }
       return emp;
     });
@@ -199,29 +190,28 @@ export default function ProfileView({ user }: ProfileViewProps) {
       await supabase.from('profiles').update({
         name: profile.name,
         email: profile.email
-      }).eq('id', user.id);
+      }).eq('id', profile.id);
       alert("Datos guardados correctamente.");
     } catch (e) {
       alert("Error guardando datos.");
     }
   };
 
-<<<<<<< HEAD
-  if (!isMounted || isLoading || !profile) {
-    return <div className="p-10 text-center font-bold text-slate-500">Cargando perfil...</div>;
+  if (!isMounted) return null;
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-20 space-y-4">
+        <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+        <div className="text-slate-500 font-bold">Cargando tu perfil...</div>
+      </div>
+    );
   }
 
-=======
-  if (!isMounted || isLoading) {
-    return <div className="p-10 text-center font-bold text-slate-500">Cargando perfil...</div>;
-  }
-
-  // Prevención de cuelgue si profile sigue siendo nulo
   if (!profile) {
     return <div className="p-10 text-center font-bold text-red-500">Error cargando perfil. Por favor, recarga la página.</div>;
   }
 
->>>>>>> deploy-v2
   const isPro = profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner' || profile.role === 'gerente';
 
   return (
@@ -244,41 +234,18 @@ export default function ProfileView({ user }: ProfileViewProps) {
 
       {/* MENÚ DE PESTAÑAS */}
       <div className="px-4 sm:px-6 -mt-10 relative z-10">
-<<<<<<< HEAD
-        <div className="bg-white rounded-2xl shadow-md p-1.5 flex border border-slate-200">
-          <button onClick={() => setActiveTab('datos')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'datos' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👤 Datos y Empresa</button>
-          <button onClick={() => setActiveTab('planes')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'planes' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>💳 Planes</button>
-          <button onClick={() => setActiveTab('equipo')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'equipo' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👥 Equipo</button>
-=======
         <div className="bg-white rounded-2xl shadow-md p-1.5 flex border border-slate-200 overflow-x-auto no-scrollbar">
           <button onClick={() => setActiveTab('datos')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'datos' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👤 Datos</button>
           <button onClick={() => setActiveTab('empresa')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'empresa' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>🏢 Empresa</button>
           <button onClick={() => setActiveTab('planes')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'planes' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>💳 Planes</button>
           <button onClick={() => setActiveTab('equipo')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'equipo' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👥 Equipo</button>
->>>>>>> deploy-v2
         </div>
       </div>
 
       <div className="p-4 sm:p-6 space-y-6 mt-2">
-<<<<<<< HEAD
-        {/* PESTAÑA: DATOS Y EMPRESA */}
-=======
         {/* PESTAÑA: MIS DATOS PERSONALES */}
->>>>>>> deploy-v2
         {activeTab === 'datos' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-            <div className="bg-gradient-to-br from-indigo-900 to-slate-900 p-6 rounded-3xl text-white shadow-xl">
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-3xl">🏢</span>
-                <div>
-                  <h3 className="font-black text-xl">Gestión de Empresa y Logotipo</h3>
-                  <p className="text-xs text-indigo-200">Configura tus datos fiscales, logo, cuentas bancarias y Bizum para los presupuestos y facturas en PDF.</p>
-                </div>
-              </div>
-            </div>
-
-            <CompanyDataForm />
-
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <h3 className="font-black text-slate-800 border-b border-slate-100 pb-2">Información Personal</h3>
               <div>
@@ -302,9 +269,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
           </div>
         )}
 
-<<<<<<< HEAD
-        {/* PESTAÑA: PLANES */}
-=======
         {/* PESTAÑA: EMPRESA Y FACTURACIÓN */}
         {activeTab === 'empresa' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
@@ -312,13 +276,12 @@ export default function ProfileView({ user }: ProfileViewProps) {
               <h3 className="font-black text-slate-800 text-lg">Configuración de Empresa</h3>
               <p className="text-xs text-slate-500">Administra el logotipo, CIF, dirección, cuentas bancarias y Bizum que saldrán impresos en tus presupuestos y facturas en PDF.</p>
             </div>
-            {/* AQUÍ SE RENDERIZA EL FORMULARIO DE EMPRESA PERFECTAMENTE AISLADO */}
+            {/* COMPONENTE SEGURO RENDERIZADO SOLO EN CLIENTE */}
             <CompanyDataForm />
           </div>
         )}
 
-        {/* PESTAÑA: PLANES (PRECIOS Y DESCRIPCIONES DETALLADAS) */}
->>>>>>> deploy-v2
+        {/* PESTAÑA: PLANES CON EXPLICACIONES COMPLETAS */}
         {activeTab === 'planes' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             <div className="text-center mb-6">
@@ -332,15 +295,10 @@ export default function ProfileView({ user }: ProfileViewProps) {
               <h4 className="font-black text-xl text-slate-800">Básico (Free)</h4>
               <p className="text-3xl font-black text-slate-800 my-2">0€ <span className="text-sm text-slate-400 font-medium">/mes</span></p>
               <ul className="space-y-2 mt-4 text-sm font-medium text-slate-600">
-<<<<<<< HEAD
                 <li className="flex items-center gap-2">✅ Chat y Calendario ilimitado</li>
                 <li className="flex items-center gap-2">✅ Módulo de Juegos Recreativos</li>
-=======
-                <li className="flex items-center gap-2">✅ Acceso al Chat y Agenda</li>
-                <li className="flex items-center gap-2">✅ Unirse a una empresa existente (Comerciales)</li>
-                <li className="flex items-center gap-2 opacity-50">❌ Módulos de Gestión (CRM, Rutas) bloqueados</li>
-                <li className="flex items-center gap-2 opacity-50">❌ Creación de Presupuestos bloqueada</li>
->>>>>>> deploy-v2
+                <li className="flex items-center gap-2 opacity-50">❌ Módulos de Gestión bloqueados</li>
+                <li className="flex items-center gap-2 opacity-50">❌ Límites en Presupuestos y CRM</li>
               </ul>
             </div>
 
@@ -349,15 +307,12 @@ export default function ProfileView({ user }: ProfileViewProps) {
               {profile.plan === 'empresa' && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <h4 className="font-black text-xl text-indigo-900">Empresa (Individual)</h4>
               <p className="text-3xl font-black text-indigo-700 my-2">29€ <span className="text-sm text-indigo-400 font-medium">/mes</span></p>
-<<<<<<< HEAD
-              <button onClick={() => handleCheckout('price_1UMVl8AT2HWOK4TeXKB7WisC')} className="w-full mt-5 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-md cursor-pointer hover:bg-indigo-700 transition">Mejorar a Empresa</button>
-=======
               <p className="text-xs text-indigo-600 font-bold mb-4 bg-white/50 inline-block px-2 py-1 rounded">Ideal para 1 autónomo o gerente</p>
               <ul className="space-y-2 text-sm font-medium text-indigo-800">
+                <li className="flex items-center gap-2">✅ Todo lo de Free ilimitado</li>
                 <li className="flex items-center gap-2 font-bold text-indigo-900">🔓 Desbloqueo de todos los Módulos</li>
-                <li className="flex items-center gap-2">✅ Gestor de Presupuestos y Facturas ilimitado</li>
-                <li className="flex items-center gap-2">✅ CRM, Clientes y Rutas activos</li>
-                <li className="flex items-center gap-2 opacity-50">❌ Sin posibilidad de vincular equipo comercial</li>
+                <li className="flex items-center gap-2">✅ Presupuestos y CRM ilimitados</li>
+                <li className="flex items-center gap-2 opacity-50">❌ Sin vinculación de comerciales</li>
               </ul>
               {profile.plan !== 'empresa' && (
                 <button 
@@ -367,23 +322,22 @@ export default function ProfileView({ user }: ProfileViewProps) {
                   Mejorar a Empresa (29€/mes)
                 </button>
               )}
->>>>>>> deploy-v2
             </div>
 
             {/* PLAN PRO */}
             <div className={`bg-slate-900 p-5 rounded-3xl border-2 transition-all ${isPro ? 'border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.3)] relative' : 'border-slate-800'}`}>
               {isPro && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-slate-900 text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
-              <h4 className="font-black text-xl text-white">Empresa PRO</h4>
+              <div className="flex justify-between items-start">
+                <h4 className="font-black text-xl text-white">Empresa PRO</h4>
+                <span className="text-2xl">🚀</span>
+              </div>
               <p className="text-3xl font-black text-white my-2">79€ <span className="text-sm text-slate-400 font-medium">/mes</span></p>
-<<<<<<< HEAD
-              <button onClick={() => handleCheckout('price_1UMVokAT2HWOK4TepVgZJ6gZ')} className="w-full mt-5 py-3 bg-amber-400 text-slate-900 font-black rounded-xl shadow-md cursor-pointer hover:bg-amber-500 transition">Contratar PRO</button>
-=======
-              <p className="text-xs text-amber-400 font-bold mb-4">La solución total para agencias y equipos</p>
+              <p className="text-xs text-amber-400 font-bold mb-4">La solución total para agencias</p>
               <ul className="space-y-2 text-sm font-medium text-slate-300">
-                <li className="flex items-center gap-2">✅ Todo lo incluido en el Plan Empresa</li>
-                <li className="flex items-center gap-2 text-amber-400 font-bold">🔗 Código para vincular Empleados Comerciales</li>
-                <li className="flex items-center gap-2">🕹️ Panel de Gestión de Permisos por empleado</li>
-                <li className="flex items-center gap-2 text-xs italic">+15€/mes por cada licencia extra de comercial activo</li>
+                <li className="flex items-center gap-2">✅ Todo lo del Plan Empresa</li>
+                <li className="flex items-center gap-2 text-amber-400 font-bold">🔗 Vincular Empleados Comerciales</li>
+                <li className="flex items-center gap-2">🕹️ Panel de Gestión de Permisos de Módulos</li>
+                <li className="flex items-center gap-2 text-xs italic">+15€/mes por cada licencia extra de comercial</li>
               </ul>
               {!isPro && (
                 <button 
@@ -393,16 +347,11 @@ export default function ProfileView({ user }: ProfileViewProps) {
                   Contratar Empresa PRO (79€/mes)
                 </button>
               )}
->>>>>>> deploy-v2
             </div>
           </div>
         )}
 
-<<<<<<< HEAD
-        {/* PESTAÑA: EQUIPO (CON GESTIÓN COMPLETA Y PERMISOS) */}
-=======
         {/* PESTAÑA: EQUIPO Y PERMISOS */}
->>>>>>> deploy-v2
         {activeTab === 'equipo' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             {!isPro ? (
@@ -456,7 +405,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
                                 <input type="checkbox" checked={emp.active_modules?.rutas || false} onChange={() => toggleEmployeeModule(emp.id, 'rutas')} className="w-4 h-4 accent-indigo-600" />
                               </label>
                               <label className="col-span-2 flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition">
-                                <span className="text-xs font-bold text-slate-700">💶 Presupuestos (Full Access)</span>
+                                <span className="text-xs font-bold text-slate-700">💶 Presupuestos</span>
                                 <input type="checkbox" checked={emp.active_modules?.presupuestos_facturas || false} onChange={() => toggleEmployeeModule(emp.id, 'presupuestos_facturas')} className="w-4 h-4 accent-indigo-600" />
                               </label>
                             </div>
