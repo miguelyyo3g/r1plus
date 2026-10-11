@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import CompanyDataForm from './CompanyDataForm'; // <-- 1. NUEVO: Importamos el formulario
+import CompanyDataForm from './CompanyDataForm';
 
 interface ProfileViewProps {
   user: any;
@@ -18,7 +18,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
   const [joinError, setJoinError] = useState('');
   const [team, setTeam] = useState<any[]>([]);
   
-  // <-- 2. NUEVO: Estado para mostrar/ocultar el formulario de empresa
+  // Estado para mostrar/ocultar el formulario de empresa flotante
   const [showCompanyForm, setShowCompanyForm] = useState(false); 
 
   // 1. CARGAR DATOS REALES DE SUPABASE
@@ -163,7 +163,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
         name: profile.name,
         email: profile.email
       }).eq('id', user.id);
-      alert("Datos guardados correctamente.");
+      alert("Datos personales guardados correctamente.");
     } catch (e) {
       alert("Error guardando datos.");
     }
@@ -206,54 +206,38 @@ export default function ProfileView({ user }: ProfileViewProps) {
         {/* PESTAÑA: MIS DATOS */}
         {activeTab === 'datos' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-            {/* <-- 3. NUEVO: Interruptor del formulario de empresa --> */}
-            {showCompanyForm ? (
-              <div className="fixed inset-0 z-[100] bg-slate-50 overflow-y-auto pt-10 pb-24 px-4">
-                <div className="max-w-2xl mx-auto flex justify-between items-center mb-6">
-                  <h2 className="text-xl font-black text-slate-800">Ficha de Empresa</h2>
-                  <button 
-                    onClick={() => setShowCompanyForm(false)}
-                    className="px-4 py-2 bg-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-300 transition"
-                  >
-                    Volver
-                  </button>
-                </div>
-                <CompanyDataForm />
+            
+            {/* 1. FORMULARIO DE DATOS PERSONALES (Siempre visible) */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              <h3 className="font-black text-slate-800 border-b border-slate-100 pb-2">Información Personal</h3>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Nombre Completo</label>
+                <input type="text" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
               </div>
-            ) : (
-              <>
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                  <h3 className="font-black text-slate-800 border-b border-slate-100 pb-2">Información Personal</h3>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Nombre Completo</label>
-                    <input type="text" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Teléfono</label>
-                    <input type="text" readOnly value={profile.phone} className="w-full p-3 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-500 outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Correo Electrónico</label>
-                    <input type="email" value={profile.email || ''} onChange={e => setProfile({...profile, email: e.target.value})} placeholder="tu@email.com" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
-                  </div>
-                  <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition">Guardar Cambios</button>
-                </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Teléfono</label>
+                <input type="text" readOnly value={profile.phone} className="w-full p-3 bg-slate-100 border border-slate-200 rounded-xl font-bold text-slate-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Correo Electrónico</label>
+                <input type="email" value={profile.email || ''} onChange={e => setProfile({...profile, email: e.target.value})} placeholder="tu@email.com" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
+              </div>
+              <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition cursor-pointer">Guardar Datos Personales</button>
+            </div>
 
-                {/* BOTÓN DE DATOS DE EMPRESA (Solo lo ven gerentes y admin) */}
-                {(profile.plan === 'empresa' || profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner') && (
-                  <button 
-                    onClick={() => setShowCompanyForm(true)}
-                    className="w-full py-4 bg-white text-indigo-700 font-bold rounded-2xl border-2 border-indigo-100 shadow-sm flex items-center justify-center gap-2 hover:bg-indigo-50 transition cursor-pointer"
-                  >
-                    <span className="text-xl">🏢</span> Editar Datos y Logo de Empresa
-                  </button>
-                )}
-                
-                <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 mt-6">
-                  Cerrar Sesión Completa
-                </button>
-              </>
+            {/* 2. BOTÓN DE DATOS DE EMPRESA Y LOGO (Solo para Gerentes y Admins) */}
+            {(profile.plan === 'empresa' || profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner') && (
+              <button 
+                onClick={() => setShowCompanyForm(true)}
+                className="w-full py-4 bg-white text-indigo-700 font-bold rounded-2xl border-2 border-indigo-100 shadow-sm flex items-center justify-center gap-2 hover:bg-indigo-50 transition cursor-pointer"
+              >
+                <span className="text-xl">🏢</span> Editar Datos y Logo de Empresa
+              </button>
             )}
+            
+            <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 mt-6 cursor-pointer">
+              Cerrar Sesión Completa
+            </button>
           </div>
         )}
 
@@ -421,6 +405,23 @@ export default function ProfileView({ user }: ProfileViewProps) {
           </div>
         )}
       </div>
+
+      {/* MODAL FLOTANTE PARA EDITAR DATOS Y LOGO DE EMPRESA */}
+      {showCompanyForm && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm overflow-y-auto pt-10 pb-24 px-4">
+          <div className="max-w-2xl mx-auto flex justify-between items-center mb-4">
+            <h2 className="text-xl font-black text-white">Configuración Corporativa</h2>
+            <button 
+              onClick={() => setShowCompanyForm(false)}
+              className="px-4 py-2 bg-white text-slate-800 rounded-xl font-bold hover:bg-slate-100 transition cursor-pointer shadow-lg"
+            >
+              ✕ Cerrar Ficha
+            </button>
+          </div>
+          <CompanyDataForm />
+        </div>
+      )}
+
     </div>
   );
 }
