@@ -18,7 +18,10 @@ export default function CompanyDataForm() {
     address: "",
     phone: "",
     logo_url: "",
+    bizum_phone: "",
   });
+
+  const [bankAccounts, setBankAccounts] = useState<Array<{ bankName: string; iban: string }>>([]);
 
   useEffect(() => {
     async function loadCompanyData() {
@@ -49,7 +52,11 @@ export default function CompanyDataForm() {
               address: org.address || "",
               phone: org.phone || "",
               logo_url: org.logo_url || "",
+              bizum_phone: org.bizum_phone || "",
             });
+            if (org.bank_accounts && Array.isArray(org.bank_accounts)) {
+              setBankAccounts(org.bank_accounts);
+            }
           }
         }
       } catch (error) {
@@ -97,6 +104,16 @@ export default function CompanyDataForm() {
     }
   };
 
+  const handleAddAccount = () => {
+    setBankAccounts([...bankAccounts, { bankName: "", iban: "" }]);
+  };
+
+  const handleRemoveAccount = (index: number) => {
+    const updated = [...bankAccounts];
+    updated.splice(index, 1);
+    setBankAccounts(updated);
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -112,6 +129,8 @@ export default function CompanyDataForm() {
         address: formData.address,
         phone: formData.phone,
         logo_url: formData.logo_url,
+        bizum_phone: formData.bizum_phone,
+        bank_accounts: bankAccounts,
       })
       .eq("id", orgId);
 
@@ -127,9 +146,10 @@ export default function CompanyDataForm() {
 
   return (
     <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-      <h2 className="text-xl font-black text-slate-800 mb-5">Editar Datos y Logotipo</h2>
-      <form onSubmit={handleSave} className="space-y-5">
+      <h2 className="text-xl font-black text-slate-800 mb-5">🏢 Ficha y Datos de Empresa</h2>
+      <form onSubmit={handleSave} className="space-y-6">
         
+        {/* Logo */}
         <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
           <div className="flex-shrink-0 w-24 h-24 bg-white border border-gray-300 rounded-lg flex items-center justify-center overflow-hidden">
             {formData.logo_url ? (
@@ -139,7 +159,7 @@ export default function CompanyDataForm() {
             )}
           </div>
           <div className="flex-1 w-full">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Logotipo de la empresa (PDFs)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Logotipo Corporativo (Presupuestos y Facturas)</label>
             <input
               type="file"
               accept="image/*"
@@ -147,49 +167,112 @@ export default function CompanyDataForm() {
               disabled={uploadingLogo}
               className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
             />
-            {uploadingLogo && <p className="text-xs text-indigo-600 mt-2">Subiendo imagen a Supabase...</p>}
+            {uploadingLogo && <p className="text-xs text-indigo-600 mt-2">Subiendo imagen...</p>}
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Nombre Comercial / Razón Social</label>
-          <input
-            type="text"
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            required
-          />
+        {/* Datos Básicos */}
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nombre Comercial / Razón Social</label>
+            <input
+              type="text"
+              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-800"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">CIF / NIF</label>
+              <input
+                type="text"
+                className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold"
+                value={formData.tax_id}
+                onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Teléfono Central</label>
+              <input
+                type="tel"
+                className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Dirección Fiscal</label>
+            <input
+              type="text"
+              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+              value={formData.address}
+              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Teléfono Bizum (Cobros)</label>
+            <input
+              type="tel"
+              placeholder="+34 600000000"
+              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono font-bold"
+              value={formData.bizum_phone}
+              onChange={(e) => setFormData({ ...formData, bizum_phone: e.target.value })}
+            />
+          </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">CIF / NIF</label>
-          <input
-            type="text"
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
-            value={formData.tax_id}
-            onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
-          />
-        </div>
+        {/* Cuentas Bancarias Dinámicas */}
+        <div className="space-y-3 pt-4 border-t border-slate-200">
+          <div className="flex justify-between items-center">
+            <h3 className="font-black text-slate-800 text-sm">Cuentas Bancarias y IBAN</h3>
+            <button
+              type="button"
+              onClick={handleAddAccount}
+              className="px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition"
+            >
+              + Añadir Cuenta
+            </button>
+          </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Dirección Fiscal</label>
-          <input
-            type="text"
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-            value={formData.address}
-            onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono Central</label>
-          <input
-            type="tel"
-            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
-            value={formData.phone}
-            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-          />
+          {bankAccounts.map((acc, index) => (
+            <div key={index} className="flex flex-col sm:flex-row gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+              <input
+                type="text"
+                placeholder="Banco (Ej. BBVA, Santander)"
+                value={acc.bankName}
+                onChange={(e) => {
+                  const updated = [...bankAccounts];
+                  updated[index].bankName = e.target.value;
+                  setBankAccounts(updated);
+                }}
+                className="flex-1 p-2.5 border border-slate-300 rounded-lg text-xs font-bold outline-none"
+              />
+              <input
+                type="text"
+                placeholder="IBAN (ESXX XXXX...)"
+                value={acc.iban}
+                onChange={(e) => {
+                  const updated = [...bankAccounts];
+                  updated[index].iban = e.target.value;
+                  setBankAccounts(updated);
+                }}
+                className="flex-[2] p-2.5 border border-slate-300 rounded-lg text-xs font-mono font-bold outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => handleRemoveAccount(index)}
+                className="px-3 py-2.5 bg-rose-100 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-200 transition"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
 
         {message && (
@@ -201,9 +284,9 @@ export default function CompanyDataForm() {
         <button
           type="submit"
           disabled={saving || uploadingLogo}
-          className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-indigo-300 cursor-pointer shadow-md"
+          className="w-full bg-indigo-600 text-white font-black py-3.5 rounded-xl hover:bg-indigo-700 transition-colors disabled:bg-indigo-300 cursor-pointer shadow-md text-sm"
         >
-          {saving ? "Guardando..." : "Guardar Ficha de Empresa"}
+          {saving ? "Guardando cambios..." : "Guardar Ficha de Empresa"}
         </button>
       </form>
     </div>
