@@ -207,7 +207,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
         {activeTab === 'datos' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             
-            {/* 1. FORMULARIO DE DATOS PERSONALES (Siempre visible) */}
+            {/* 1. FORMULARIO DE DATOS PERSONALES */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <h3 className="font-black text-slate-800 border-b border-slate-100 pb-2">Información Personal</h3>
               <div>
@@ -225,15 +225,13 @@ export default function ProfileView({ user }: ProfileViewProps) {
               <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition cursor-pointer">Guardar Datos Personales</button>
             </div>
 
-            {/* 2. BOTÓN DE DATOS DE EMPRESA Y LOGO (Solo para Gerentes y Admins) */}
-            {(profile.plan === 'empresa' || profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner') && (
-              <button 
-                onClick={() => setShowCompanyForm(true)}
-                className="w-full py-4 bg-white text-indigo-700 font-bold rounded-2xl border-2 border-indigo-100 shadow-sm flex items-center justify-center gap-2 hover:bg-indigo-50 transition cursor-pointer"
-              >
-                <span className="text-xl">🏢</span> Editar Datos y Logo de Empresa
-              </button>
-            )}
+            {/* 2. BOTÓN DE DATOS DE EMPRESA Y LOGO (Visible directamente para pruebas) */}
+            <button 
+              onClick={() => setShowCompanyForm(true)}
+              className="w-full py-4 bg-white text-indigo-700 font-bold rounded-2xl border-2 border-indigo-100 shadow-sm flex items-center justify-center gap-2 hover:bg-indigo-50 transition cursor-pointer"
+            >
+              <span className="text-xl">🏢</span> Editar Datos y Logo de Empresa
+            </button>
             
             <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 mt-6 cursor-pointer">
               Cerrar Sesión Completa
