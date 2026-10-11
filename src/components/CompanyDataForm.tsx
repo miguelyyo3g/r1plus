@@ -26,6 +26,8 @@ export default function CompanyDataForm() {
   useEffect(() => {
     async function loadCompanyData() {
       try {
+        if (typeof window === 'undefined') return;
+
         const { data: sessionData } = await supabase.auth.getSession();
         const user = sessionData?.session?.user;
         if (!user) return;
@@ -149,7 +151,6 @@ export default function CompanyDataForm() {
       <h2 className="text-xl font-black text-slate-800 mb-5">🏢 Ficha y Datos de Empresa</h2>
       <form onSubmit={handleSave} className="space-y-6">
         
-        {/* Logo */}
         <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
           <div className="flex-shrink-0 w-24 h-24 bg-white border border-gray-300 rounded-lg flex items-center justify-center overflow-hidden">
             {formData.logo_url ? (
@@ -171,7 +172,6 @@ export default function CompanyDataForm() {
           </div>
         </div>
 
-        {/* Datos Básicos */}
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Nombre Comercial / Razón Social</label>
@@ -227,7 +227,6 @@ export default function CompanyDataForm() {
           </div>
         </div>
 
-        {/* Cuentas Bancarias Dinámicas */}
         <div className="space-y-3 pt-4 border-t border-slate-200">
           <div className="flex justify-between items-center">
             <h3 className="font-black text-slate-800 text-sm">Cuentas Bancarias y IBAN</h3>
