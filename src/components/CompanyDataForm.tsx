@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 "use client";
 
 import { useState, useEffect } from "react";
@@ -5,6 +6,14 @@ import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 export default function CompanyDataForm() {
   const supabase = createClientComponentClient();
+=======
+CompanyDataForm.tsxCompanyDataForm.tsxCompanyDataForm.tsx"use client";
+
+import { useState, useEffect } from "react";
+import { supabase } from '../lib/supabase'; // <-- Usamos tu conexión existente
+
+export default function CompanyDataForm() {
+>>>>>>> deploy-v2
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -59,9 +68,15 @@ export default function CompanyDataForm() {
     }
 
     loadCompanyData();
+<<<<<<< HEAD
   }, [supabase]);
 
   // Función exclusiva para subir el Logo a Storage
+=======
+  }, []);
+
+  // Función para subir el Logo a Storage
+>>>>>>> deploy-v2
   const uploadLogo = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
       setUploadingLogo(true);
@@ -77,20 +92,30 @@ export default function CompanyDataForm() {
 
       const file = event.target.files[0];
       const fileExt = file.name.split('.').pop();
+<<<<<<< HEAD
       // Creamos un nombre único para evitar que la caché muestre logos viejos
       const fileName = `logo-${orgId}-${Date.now()}.${fileExt}`;
 
       // Subimos el archivo al bucket 'logos'
+=======
+      const fileName = `logo-${orgId}-${Date.now()}.${fileExt}`;
+
+>>>>>>> deploy-v2
       const { error: uploadError } = await supabase.storage
         .from('logos')
         .upload(fileName, file, { upsert: true });
 
       if (uploadError) throw uploadError;
 
+<<<<<<< HEAD
       // Obtenemos la URL pública de la imagen recién subida
       const { data } = supabase.storage.from('logos').getPublicUrl(fileName);
 
       // Actualizamos el estado del formulario con la nueva URL
+=======
+      const { data } = supabase.storage.from('logos').getPublicUrl(fileName);
+
+>>>>>>> deploy-v2
       setFormData({ ...formData, logo_url: data.publicUrl });
       setMessage("✅ Imagen subida. Dale a 'Guardar Ficha' para aplicar los cambios.");
       
@@ -101,7 +126,10 @@ export default function CompanyDataForm() {
     }
   };
 
+<<<<<<< HEAD
   // Guardar todos los textos y la URL del logo en la base de datos
+=======
+>>>>>>> deploy-v2
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -131,9 +159,13 @@ export default function CompanyDataForm() {
   if (loading) return <div className="p-4 text-gray-500">Cargando ficha de empresa...</div>;
 
   return (
+<<<<<<< HEAD
     <div className="max-w-2xl mx-auto p-6 bg-white rounded-xl shadow-sm border border-gray-100">
       <h2 className="text-2xl font-bold text-gray-800 mb-6">Ficha de la Empresa</h2>
       
+=======
+    <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+>>>>>>> deploy-v2
       <form onSubmit={handleSave} className="space-y-5">
         
         {/* Selector de Logo Visual */}
@@ -152,9 +184,15 @@ export default function CompanyDataForm() {
               accept="image/*"
               onChange={uploadLogo}
               disabled={uploadingLogo}
+<<<<<<< HEAD
               className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
             />
             {uploadingLogo && <p className="text-xs text-blue-600 mt-2">Subiendo imagen...</p>}
+=======
+              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+            />
+            {uploadingLogo && <p className="text-xs text-indigo-600 mt-2">Subiendo imagen...</p>}
+>>>>>>> deploy-v2
           </div>
         </div>
 
@@ -163,7 +201,11 @@ export default function CompanyDataForm() {
           <label className="block text-sm font-medium text-gray-700 mb-1">Nombre Comercial / Razón Social</label>
           <input
             type="text"
+<<<<<<< HEAD
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+=======
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+>>>>>>> deploy-v2
             value={formData.name}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             required
@@ -175,7 +217,11 @@ export default function CompanyDataForm() {
           <label className="block text-sm font-medium text-gray-700 mb-1">CIF / NIF</label>
           <input
             type="text"
+<<<<<<< HEAD
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+=======
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+>>>>>>> deploy-v2
             value={formData.tax_id}
             onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
           />
@@ -186,7 +232,11 @@ export default function CompanyDataForm() {
           <label className="block text-sm font-medium text-gray-700 mb-1">Dirección Fiscal</label>
           <input
             type="text"
+<<<<<<< HEAD
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+=======
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+>>>>>>> deploy-v2
             value={formData.address}
             onChange={(e) => setFormData({ ...formData, address: e.target.value })}
           />
@@ -197,7 +247,11 @@ export default function CompanyDataForm() {
           <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono Central</label>
           <input
             type="tel"
+<<<<<<< HEAD
             className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+=======
+            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+>>>>>>> deploy-v2
             value={formData.phone}
             onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
           />
@@ -212,7 +266,11 @@ export default function CompanyDataForm() {
         <button
           type="submit"
           disabled={saving || uploadingLogo}
+<<<<<<< HEAD
           className="w-full bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-blue-300"
+=======
+          className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-indigo-300"
+>>>>>>> deploy-v2
         >
           {saving ? "Guardando..." : "Guardar Ficha de Empresa"}
         </button>

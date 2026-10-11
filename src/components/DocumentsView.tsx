@@ -4,6 +4,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface DocumentsViewProps {
   user: any;
@@ -19,6 +21,10 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [allExpenses, setAllExpenses] = useState<any[]>([]);
   const [allAttachments, setAllAttachments] = useState<any[]>([]);
   const [userProfile, setUserProfile] = useState<any>(null);
+  
+  // NUEVO: Estado para guardar la ficha de la organización (Logo, CIF, Dirección)
+  const [companyOrg, setCompanyOrg] = useState<any>(null);
+
   const [isLoading, setIsLoading] = useState(true);
 
   const [crmSearchQuery, setCrmSearchQuery] = useState('');
@@ -102,8 +108,15 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setIsLoading(true);
     try {
       if (!user || !user.id) return;
+
+      // 1. Cargamos perfil y datos de la empresa corporativa (Organización)
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       setUserProfile(profile);
+
+      if (profile?.organization_id) {
+        const { data: orgData } = await supabase.from('organizations').select('*').eq('id', profile.organization_id).single();
+        if (orgData) setCompanyOrg(orgData);
+      }
 
       let bQ = supabase.from('budgets').select('*').order('created_at', { ascending: false });
       let cQ = supabase.from('clients').select('*').order('name', { ascending: true });
@@ -762,62 +775,125 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     } catch (err: any) {}
   };
 
+  // ==========================================
+  // GENERACIÓN DE PDF PROFESIONAL CON LOGO
+  // ==========================================
   const handleGeneratePdfAction = async (docData: any, method: 'whatsapp' | 'email' | 'download') => {
     setIsGeneratingPdf(true);
     try {
       const doc = new jsPDF();
       const isFactura = docData.type === 'factura';
 
-      doc.setFontSize(22);
-      doc.setTextColor(79, 70, 229); 
-      doc.text(isFactura ? 'FACTURA' : 'PRESUPUESTO', 14, 20);
+      let currentY = 15;
 
-      doc.setFontSize(10);
+      // 1. SI EXISTE LOGO CORPORATIVO DE LA ORGANIZACIÓN, LO INSERTAMOS ARRIBA
+      if (companyOrg?.logo_url) {
+        try {
+          // Cargamos la imagen mediante una promesa para asegurarnos de que se dibuje
+          const imgData = await new Promise<string>((resolve, reject) => {
+            const image = new Image();
+            image.crossOrigin = 'anonymous';
+            image.src = companyOrg.logo_url;
+            image.onload = () => {
+              const canvas = document.createElement('canvas');
+              canvas.width = image.width;
+              canvas.height = image.height;
+              const ctx = canvas.getContext('2d');
+              ctx?.drawImage(image, 0, 0);
+              resolve(canvas.toDataURL('image/png'));
+            };
+            image.onerror = (err) => reject(err);
+          });
+
+          // Dibujamos el logo en el PDF (coordenada X: 14, Y: 15, Ancho: 30, Alto: automático o proporcional)
+          doc.addImage(imgData, 'PNG', 14, currentY, 28, 28);
+          currentY += 32; // Bajamos el cursor Y para que no se solape
+        } catch (logoErr) {
+          console.warn("No se pudo incrustar el logo en el PDF, continuando sin él...", logoErr);
+        }
+      }
+
+      // 2. DATOS FISCALES DE LA EMPRESA EMISORA (A LA IZQUIERDA O JUNTO AL LOGO)
+      doc.setFontSize(14);
+      doc.setTextColor(30, 41, 59);
+      doc.text(companyOrg?.name || userProfile?.name || 'Empresa Colaboradora', companyOrg?.logo_url ? 46 : 14, currentY - (companyOrg?.logo_url ? 20 : 0));
+      
+      doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
-      doc.text(`Código: ${docData.code}`, 14, 28);
-      if (docData.work_order_ref) doc.text(`Ref. Obra: ${docData.work_order_ref}`, 14, 34);
-      doc.text(`Fecha: ${new Date(docData.created_at).toLocaleDateString()}`, 14, docData.work_order_ref ? 40 : 34);
+      let infoY = currentY - (companyOrg?.logo_url ? 14 : 4);
+      if (companyOrg?.tax_id) {
+        doc.text(`CIF / NIF: ${companyOrg.tax_id}`, companyOrg?.logo_url ? 46 : 14, infoY);
+        infoY += 4;
+      }
+      if (companyOrg?.address) {
+        doc.text(companyOrg.address, companyOrg?.logo_url ? 46 : 14, infoY);
+        infoY += 4;
+      }
+      if (companyOrg?.phone) {
+        doc.text(`Tel: ${companyOrg.phone}`, companyOrg?.logo_url ? 46 : 14, infoY);
+      }
+
+      // TÍTULO DEL DOCUMENTO (A LA DERECHA)
+      doc.setFontSize(20);
+      doc.setTextColor(79, 70, 229); 
+      doc.text(isFactura ? 'FACTURA' : 'PRESUPUESTO', 195, 20, { align: 'right' });
+
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Ref: ${docData.code}`, 195, 26, { align: 'right' });
+      if (docData.work_order_ref) doc.text(`Obra: ${docData.work_order_ref}`, 195, 31, { align: 'right' });
+      doc.text(`Fecha: ${new Date(docData.created_at).toLocaleDateString()}`, 195, docData.work_order_ref ? 36 : 31, { align: 'right' });
 
       if (isFactura && docData.status === 'cobrada') {
         doc.setTextColor(16, 185, 129);
-        doc.text(`ESTADO: COBRADA (${docData.payment_method})`, 14, 46);
+        doc.text(`PAGADA (${docData.payment_method})`, 195, 42, { align: 'right' });
       } else if (isFactura) {
         doc.setTextColor(245, 158, 11);
-        doc.text(`ESTADO: PENDIENTE DE PAGO`, 14, 46);
+        doc.text(`PENDIENTE DE PAGO`, 195, 42, { align: 'right' });
       }
 
-      doc.setFontSize(12);
+      // LÍNEA DIVISORIA
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, 48, 195, 48);
+
+      // 3. DATOS DEL CLIENTE (DESTINATARIO)
+      doc.setFontSize(11);
       doc.setTextColor(30, 41, 59);
-      doc.text('Datos del Cliente:', 120, 20);
-      doc.setFontSize(10);
+      doc.text('Datos del Cliente:', 14, 56);
+      
+      doc.setFontSize(9);
       doc.setTextColor(100, 100, 100);
-      doc.text(docData.client || 'Cliente', 120, 28);
-      if(docData.client_cif) doc.text(`CIF/NIF: ${docData.client_cif}`, 120, 34);
+      doc.text(docData.client || 'Particular', 14, 62);
+      if(docData.client_cif) doc.text(`CIF/NIF: ${docData.client_cif}`, 14, 67);
       if(docData.address) {
-        const addressLines = doc.splitTextToSize(docData.address, 70);
-        doc.text(addressLines, 120, 40);
+        const addressLines = doc.splitTextToSize(docData.address, 80);
+        doc.text(addressLines, 14, 72);
       }
 
+      // 4. TABLA DE PARTIDAS
       const itemsList = docData.items || [];
       const tableData = itemsList.map((item: any) => [
         item.desc, item.qty, `${Number(item.price).toFixed(2)} €`, `${(Number(item.qty) * Number(item.price)).toFixed(2)} €`
       ]);
 
       autoTable(doc, {
-        startY: 55,
+        startY: 85,
         head: [['Descripción', 'Cantidad', 'Precio Unit.', 'Total']],
         body: tableData,
         theme: 'striped',
-        headStyles: { fillColor: [79, 70, 229] }
+        headStyles: { fillColor: [79, 70, 229] },
+        styles: { fontSize: 9 }
       });
 
+      // 5. TOTALES
       const finalY = (doc as any).lastAutoTable.finalY + 10;
-      doc.setFontSize(10);
-      doc.text(`Subtotal: ${Number(docData.subtotal).toFixed(2)} €`, 130, finalY);
-      doc.text(`IVA (21%): ${Number(docData.vat).toFixed(2)} €`, 130, finalY + 6);
-      doc.setFontSize(12);
+      doc.setFontSize(9);
+      doc.text(`Subtotal: ${Number(docData.subtotal).toFixed(2)} €`, 195, finalY, { align: 'right' });
+      doc.text(`IVA (21%): ${Number(docData.vat).toFixed(2)} €`, 195, finalY + 5, { align: 'right' });
+      
+      doc.setFontSize(11);
       doc.setTextColor(0, 0, 0);
-      doc.text(`TOTAL: ${Number(docData.total).toFixed(2)} €`, 130, finalY + 14);
+      doc.text(`TOTAL: ${Number(docData.total).toFixed(2)} €`, 195, finalY + 13, { align: 'right' });
 
       if (method === 'download') {
         doc.save(`${docData.code}.pdf`);
