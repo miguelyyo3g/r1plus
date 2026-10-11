@@ -4,7 +4,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import CompanyDataForm from './CompanyDataForm';
+import dynamic from 'next/dynamic';
+
+// BLINDAJE PARA VERCEL: Obligamos a que el formulario de empresa solo se renderice en el cliente (navegador)
+// Esto evita el 100% de los errores de compilación estática (build) relacionados con este componente.
+const CompanyDataForm = dynamic(() => import('./CompanyDataForm'), { 
+  ssr: false,
+  loading: () => <div className="p-4 text-center text-slate-500 font-bold">Cargando gestor de empresa...</div>
+});
 
 interface ProfileViewProps {
   user: any;
@@ -39,9 +46,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
       
       let currentProfile = profileData;
 
-      // BLINDAJE: Si el perfil no existe en la base de datos, creamos uno por defecto en memoria para no bloquear la app
       if (error || !currentProfile) {
-        console.warn("Perfil no encontrado, usando fallback en memoria", error);
         currentProfile = {
           id: user.id,
           name: user.email?.split('@')[0] || 'Usuario',
@@ -53,17 +58,14 @@ export default function ProfileView({ user }: ProfileViewProps) {
         };
       }
 
-      // Autogenerar código de empresa si es gerente/admin y no tiene
       if ((currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') && !currentProfile.company_code) {
         const newCode = 'EMP-' + Math.floor(1000 + Math.random() * 9000);
-        // Intentamos guardarlo, pero si falla no bloqueamos
         await supabase.from('profiles').update({ company_code: newCode }).eq('id', user.id).catch(() => {});
         currentProfile.company_code = newCode;
       }
 
       setProfile(currentProfile);
 
-      // Cargar equipo si tiene permisos
       if (currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') {
         const { data: teamData } = await supabase
           .from('profiles')
@@ -80,7 +82,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
       }
     } catch (err) {
       console.error("Error crítico cargando perfil:", err);
-      // Última red de seguridad
       setProfile({
         id: user?.id,
         name: user?.email?.split('@')[0] || 'Usuario',
@@ -192,11 +193,12 @@ export default function ProfileView({ user }: ProfileViewProps) {
     }
   };
 
-  if (!isMounted || isLoading) {
+  if (!isMounted) return null;
+
+  if (isLoading) {
     return <div className="p-10 text-center font-bold text-slate-500">Cargando perfil...</div>;
   }
 
-  // Prevención de cuelgue si profile sigue siendo nulo
   if (!profile) {
     return <div className="p-10 text-center font-bold text-red-500">Error cargando perfil. Por favor, recarga la página.</div>;
   }
@@ -265,12 +267,12 @@ export default function ProfileView({ user }: ProfileViewProps) {
               <h3 className="font-black text-slate-800 text-lg">Configuración de Empresa</h3>
               <p className="text-xs text-slate-500">Administra el logotipo, CIF, dirección, cuentas bancarias y Bizum que saldrán impresos en tus presupuestos y facturas en PDF.</p>
             </div>
-            {/* AQUÍ SE RENDERIZA EL FORMULARIO DE EMPRESA PERFECTAMENTE AISLADO */}
+            {/* CARGADO DINÁMICAMENTE SIN SSR */}
             <CompanyDataForm />
           </div>
         )}
 
-        {/* PESTAÑA: PLANES (PRECIOS Y DESCRIPCIONES DETALLADAS) */}
+        {/* PESTAÑA: PLANES */}
         {activeTab === 'planes' && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
             <div className="text-center mb-6">
@@ -278,42 +280,30 @@ export default function ProfileView({ user }: ProfileViewProps) {
               <p className="text-sm text-slate-500 mt-1">Desbloquea todo el potencial de la plataforma.</p>
             </div>
 
-            {/* PLAN FREE */}
             <div className={`bg-white p-5 rounded-3xl border-2 transition-all ${profile.plan === 'free' ? 'border-slate-800 shadow-md relative' : 'border-slate-200 opacity-70'}`}>
               {profile.plan === 'free' && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <h4 className="font-black text-xl text-slate-800">Básico (Free)</h4>
               <p className="text-3xl font-black text-slate-800 my-2">0€ <span className="text-sm text-slate-400 font-medium">/mes</span></p>
               <ul className="space-y-2 mt-4 text-sm font-medium text-slate-600">
                 <li className="flex items-center gap-2">✅ Acceso al Chat y Agenda</li>
-                <li className="flex items-center gap-2">✅ Unirse a una empresa existente (Comerciales)</li>
-                <li className="flex items-center gap-2 opacity-50">❌ Módulos de Gestión (CRM, Rutas) bloqueados</li>
-                <li className="flex items-center gap-2 opacity-50">❌ Creación de Presupuestos bloqueada</li>
+                <li className="flex items-center gap-2">✅ Unirse a una empresa existente</li>
               </ul>
             </div>
 
-            {/* PLAN EMPRESA */}
             <div className={`bg-indigo-50 p-5 rounded-3xl border-2 transition-all ${profile.plan === 'empresa' ? 'border-indigo-600 shadow-md relative' : 'border-indigo-200'}`}>
               {profile.plan === 'empresa' && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <h4 className="font-black text-xl text-indigo-900">Empresa (Individual)</h4>
               <p className="text-3xl font-black text-indigo-700 my-2">29€ <span className="text-sm text-indigo-400 font-medium">/mes</span></p>
-              <p className="text-xs text-indigo-600 font-bold mb-4 bg-white/50 inline-block px-2 py-1 rounded">Ideal para 1 autónomo o gerente</p>
               <ul className="space-y-2 text-sm font-medium text-indigo-800">
                 <li className="flex items-center gap-2 font-bold text-indigo-900">🔓 Desbloqueo de todos los Módulos</li>
-                <li className="flex items-center gap-2">✅ Gestor de Presupuestos y Facturas ilimitado</li>
+                <li className="flex items-center gap-2">✅ Gestor de Presupuestos y Facturas</li>
                 <li className="flex items-center gap-2">✅ CRM, Clientes y Rutas activos</li>
-                <li className="flex items-center gap-2 opacity-50">❌ Sin posibilidad de vincular equipo comercial</li>
               </ul>
               {profile.plan !== 'empresa' && (
-                <button 
-                  onClick={() => handleCheckout('price_1UMVl8AT2HWOK4TeXKB7WisC')} 
-                  className="w-full mt-5 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-md cursor-pointer hover:bg-indigo-700 transition"
-                >
-                  Mejorar a Empresa (29€/mes)
-                </button>
+                <button onClick={() => handleCheckout('price_1UMVl8AT2HWOK4TeXKB7WisC')} className="w-full mt-5 py-3 bg-indigo-600 text-white font-black rounded-xl shadow-md cursor-pointer hover:bg-indigo-700 transition">Mejorar a Empresa (29€/mes)</button>
               )}
             </div>
 
-            {/* PLAN PRO */}
             <div className={`bg-slate-900 p-5 rounded-3xl border-2 transition-all ${isPro ? 'border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.3)] relative' : 'border-slate-800'}`}>
               {isPro && <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-slate-900 text-[10px] font-black uppercase px-3 py-1 rounded-full tracking-widest">Plan Actual</span>}
               <div className="flex justify-between items-start">
@@ -321,20 +311,13 @@ export default function ProfileView({ user }: ProfileViewProps) {
                 <span className="text-2xl">🚀</span>
               </div>
               <p className="text-3xl font-black text-white my-2">79€ <span className="text-sm text-slate-400 font-medium">/mes</span></p>
-              <p className="text-xs text-amber-400 font-bold mb-4">La solución total para agencias y equipos</p>
               <ul className="space-y-2 text-sm font-medium text-slate-300">
                 <li className="flex items-center gap-2">✅ Todo lo incluido en el Plan Empresa</li>
-                <li className="flex items-center gap-2 text-amber-400 font-bold">🔗 Código para vincular Empleados Comerciales</li>
-                <li className="flex items-center gap-2">🕹️ Panel de Gestión de Permisos por empleado</li>
-                <li className="flex items-center gap-2 text-xs italic">+15€/mes por cada licencia extra de comercial activo</li>
+                <li className="flex items-center gap-2 text-amber-400 font-bold">🔗 Vincular Empleados Comerciales</li>
+                <li className="flex items-center gap-2">🕹️ Panel de Gestión de Permisos</li>
               </ul>
               {!isPro && (
-                <button 
-                  onClick={() => handleCheckout('price_1UMVokAT2HWOK4TepVgZJ6gZ')} 
-                  className="w-full mt-5 py-3 bg-amber-400 text-slate-900 font-black rounded-xl shadow-md cursor-pointer hover:bg-amber-500 transition"
-                >
-                  Contratar Empresa PRO (79€/mes)
-                </button>
+                <button onClick={() => handleCheckout('price_1UMVokAT2HWOK4TepVgZJ6gZ')} className="w-full mt-5 py-3 bg-amber-400 text-slate-900 font-black rounded-xl shadow-md cursor-pointer hover:bg-amber-500 transition">Contratar Empresa PRO (79€/mes)</button>
               )}
             </div>
           </div>
@@ -394,7 +377,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
                                 <input type="checkbox" checked={emp.active_modules?.rutas || false} onChange={() => toggleEmployeeModule(emp.id, 'rutas')} className="w-4 h-4 accent-indigo-600" />
                               </label>
                               <label className="col-span-2 flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition">
-                                <span className="text-xs font-bold text-slate-700">💶 Presupuestos (Full Access)</span>
+                                <span className="text-xs font-bold text-slate-700">💶 Presupuestos</span>
                                 <input type="checkbox" checked={emp.active_modules?.presupuestos_facturas || false} onChange={() => toggleEmployeeModule(emp.id, 'presupuestos_facturas')} className="w-4 h-4 accent-indigo-600" />
                               </label>
                             </div>
