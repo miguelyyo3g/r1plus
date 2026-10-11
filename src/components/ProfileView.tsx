@@ -11,18 +11,16 @@ interface ProfileViewProps {
 }
 
 export default function ProfileView({ user }: ProfileViewProps) {
-  const [activeTab, setActiveTab] = useState<'datos' | 'planes' | 'equipo'>('datos');
+  const [isMounted, setIsMounted] = useState(false);
+  const [activeTab, setActiveTab] = useState<'datos' | 'planes' | 'equipo' | 'empresa'>('datos');
   const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState('');
   const [team, setTeam] = useState<any[]>([]);
-  
-  // Estado para mostrar/ocultar el formulario de empresa flotante
-  const [showCompanyForm, setShowCompanyForm] = useState(false); 
 
-  // 1. CARGAR DATOS REALES DE SUPABASE
   useEffect(() => {
+    setIsMounted(true);
     if (user && user.id) loadProfileData();
   }, [user]);
 
@@ -38,7 +36,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
       if (error) throw error;
 
       let currentProfile = profileData;
-      if ((currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner') && !currentProfile.company_code) {
+      if ((currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') && !currentProfile.company_code) {
         const newCode = 'EMP-' + Math.floor(1000 + Math.random() * 9000);
         await supabase.from('profiles').update({ company_code: newCode }).eq('id', user.id);
         currentProfile.company_code = newCode;
@@ -46,7 +44,7 @@ export default function ProfileView({ user }: ProfileViewProps) {
 
       setProfile(currentProfile);
 
-      if (currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner') {
+      if (currentProfile.plan === 'empresa_pro' || currentProfile.role === 'admin' || currentProfile.role === 'supplier_owner' || currentProfile.role === 'gerente') {
         const { data: teamData } = await supabase
           .from('profiles')
           .select('id, name, phone, email, active_modules')
@@ -67,7 +65,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
     }
   };
 
-  // 2. LÓGICA DE CHECKOUT CON STRIPE
   const handleCheckout = async (priceId: string) => {
     try {
       const res = await fetch('/api/checkout', {
@@ -90,7 +87,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
     }
   };
 
-  // 3. LÓGICA DEL FREE PARA UNIRSE A UNA EMPRESA
   const handleJoinCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     setJoinError('');
@@ -130,7 +126,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
     }
   };
 
-  // 4. LÓGICA DEL GERENTE PARA CAMBIAR PERMISOS
   const toggleEmployeeModule = async (empId: string, moduleName: string) => {
     const updatedTeam = team.map(emp => {
       if (emp.id === empId) {
@@ -163,17 +158,17 @@ export default function ProfileView({ user }: ProfileViewProps) {
         name: profile.name,
         email: profile.email
       }).eq('id', user.id);
-      alert("Datos personales guardados correctamente.");
+      alert("Datos guardados correctamente.");
     } catch (e) {
       alert("Error guardando datos.");
     }
   };
 
-  if (isLoading || !profile) {
+  if (!isMounted || isLoading || !profile) {
     return <div className="p-10 text-center font-bold text-slate-500">Cargando perfil...</div>;
   }
 
-  const isPro = profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner';
+  const isPro = profile.plan === 'empresa_pro' || profile.role === 'admin' || profile.role === 'supplier_owner' || profile.role === 'gerente';
 
   return (
     <div className="bg-slate-50 min-h-full pb-24">
@@ -195,25 +190,18 @@ export default function ProfileView({ user }: ProfileViewProps) {
 
       {/* MENÚ DE PESTAÑAS */}
       <div className="px-4 sm:px-6 -mt-10 relative z-10">
-        <div className="bg-white rounded-2xl shadow-md p-1.5 flex border border-slate-200">
-          <button onClick={() => setActiveTab('datos')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'datos' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👤 Datos</button>
-          <button onClick={() => setActiveTab('planes')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'planes' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>💳 Planes</button>
-          <button onClick={() => setActiveTab('equipo')} className={`flex-1 py-2.5 rounded-xl text-xs sm:text-sm font-black transition ${activeTab === 'equipo' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>🏢 Equipo</button>
+        <div className="bg-white rounded-2xl shadow-md p-1.5 flex border border-slate-200 overflow-x-auto no-scrollbar">
+          <button onClick={() => setActiveTab('datos')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'datos' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👤 Datos</button>
+          <button onClick={() => setActiveTab('empresa')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'empresa' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>🏢 Empresa</button>
+          <button onClick={() => setActiveTab('planes')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'planes' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>💳 Planes</button>
+          <button onClick={() => setActiveTab('equipo')} className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-black transition whitespace-nowrap ${activeTab === 'equipo' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50'}`}>👥 Equipo</button>
         </div>
       </div>
 
       <div className="p-4 sm:p-6 space-y-6 mt-2">
-        {/* PESTAÑA: MIS DATOS */}
+        {/* PESTAÑA: MIS DATOS PERSONALES */}
         {activeTab === 'datos' && (
-<<<<<<< HEAD
-          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-            
-            {/* 1. FORMULARIO DE DATOS PERSONALES */}
-=======
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-            
-            {/* 1. INFORMACIÓN PERSONAL */}
->>>>>>> deploy-v2
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <h3 className="font-black text-slate-800 border-b border-slate-100 pb-2">Información Personal</h3>
               <div>
@@ -228,33 +216,23 @@ export default function ProfileView({ user }: ProfileViewProps) {
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Correo Electrónico</label>
                 <input type="email" value={profile.email || ''} onChange={e => setProfile({...profile, email: e.target.value})} placeholder="tu@email.com" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold focus:outline-none focus:border-indigo-500 text-slate-700" />
               </div>
-<<<<<<< HEAD
-              <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition cursor-pointer">Guardar Datos Personales</button>
-=======
-              <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition">Guardar Cambios Personales</button>
+              <button onClick={handleSaveProfile} className="w-full py-3 bg-indigo-600 text-white rounded-xl font-black shadow-md hover:bg-indigo-700 transition cursor-pointer">Guardar Cambios</button>
             </div>
-
-            {/* 2. FICHA Y CONFIGURACIÓN CORPORATIVA (LOGO, CIF, BIZUM, CUENTAS BANCARIAS) */}
-            <div className="pt-2">
-              <div className="mb-3 px-1">
-                <h3 className="font-black text-slate-800 text-base">Ficha de Empresa y Facturación</h3>
-                <p className="text-xs text-slate-500">Estos datos y el logotipo aparecerán automáticamente en tus presupuestos y facturas en PDF.</p>
-              </div>
-              <CompanyDataForm />
->>>>>>> deploy-v2
-            </div>
-
-            {/* 2. BOTÓN DE DATOS DE EMPRESA Y LOGO (Visible directamente para pruebas) */}
-            <button 
-              onClick={() => setShowCompanyForm(true)}
-              className="w-full py-4 bg-white text-indigo-700 font-bold rounded-2xl border-2 border-indigo-100 shadow-sm flex items-center justify-center gap-2 hover:bg-indigo-50 transition cursor-pointer"
-            >
-              <span className="text-xl">🏢</span> Editar Datos y Logo de Empresa
-            </button>
             
             <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-4 text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 mt-6 cursor-pointer">
               Cerrar Sesión Completa
             </button>
+          </div>
+        )}
+
+        {/* PESTAÑA: EMPRESA Y FACTURACIÓN */}
+        {activeTab === 'empresa' && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
+            <div className="mb-2 px-1">
+              <h3 className="font-black text-slate-800 text-lg">Configuración de Empresa</h3>
+              <p className="text-xs text-slate-500">Administra el logotipo, CIF, dirección, cuentas bancarias y Bizum que saldrán impresos en tus presupuestos y facturas en PDF.</p>
+            </div>
+            <CompanyDataForm />
           </div>
         )}
 
@@ -422,23 +400,6 @@ export default function ProfileView({ user }: ProfileViewProps) {
           </div>
         )}
       </div>
-
-      {/* MODAL FLOTANTE PARA EDITAR DATOS Y LOGO DE EMPRESA */}
-      {showCompanyForm && (
-        <div className="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm overflow-y-auto pt-10 pb-24 px-4">
-          <div className="max-w-2xl mx-auto flex justify-between items-center mb-4">
-            <h2 className="text-xl font-black text-white">Configuración Corporativa</h2>
-            <button 
-              onClick={() => setShowCompanyForm(false)}
-              className="px-4 py-2 bg-white text-slate-800 rounded-xl font-bold hover:bg-slate-100 transition cursor-pointer shadow-lg"
-            >
-              ✕ Cerrar Ficha
-            </button>
-          </div>
-          <CompanyDataForm />
-        </div>
-      )}
-
     </div>
   );
 }
