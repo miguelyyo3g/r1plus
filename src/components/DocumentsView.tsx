@@ -52,8 +52,14 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [bPhone, setBPhone] = useState('');
   const [bContact, setBContact] = useState(''); 
   const [bBankAccount, setBBankAccount] = useState(''); 
+  
   const [bItems, setBItems] = useState<Array<{ desc: string; qty: number; price: number }>>([{ desc: '', qty: 1, price: 0 }]);
   const [bConditions, setBConditions] = useState<Array<{ title: string; description: string }>>([]);
+  
+  // PORTADA DEL PRESUPUESTO
+  const [bHasCover, setBHasCover] = useState(false);
+  const [bCoverType, setBCoverType] = useState<'corporate' | 'custom'>('corporate');
+  const [bCoverText, setBCoverText] = useState('');
 
   const [showAdvancedClientFields, setShowAdvancedClientFields] = useState(false); 
   const [isScanning, setIsScanning] = useState(false);
@@ -193,6 +199,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setBValidUntil('');
     setBItems([{ desc: '', qty: 1, price: 0 }]);
     setBConditions([]);
+    setBHasCover(false);
+    setBCoverType('corporate');
+    setBCoverText('');
     setShowAdvancedClientFields(false); 
   };
 
@@ -219,6 +228,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       
       setBItems(budgetToEdit.items && budgetToEdit.items.length > 0 ? budgetToEdit.items : [{ desc: '', qty: 1, price: 0 }]);
       setBConditions(budgetToEdit.conditions || []);
+      setBHasCover(budgetToEdit.has_cover || false);
+      setBCoverType(budgetToEdit.cover_type || 'corporate');
+      setBCoverText(budgetToEdit.cover_text || '');
       setShowAdvancedClientFields(false); 
     } else {
       resetBudgetForm();
@@ -365,17 +377,14 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setShowSuggestions(false);
   };
 
-  // BUSCADOR INTELIGENTE DE PARTIDAS (CATÁLOGO + HISTORIAL)
   const getFilteredItemsSuggestions = (desc: string) => {
     if (!desc.trim()) return [];
     const query = desc.toLowerCase();
     
-    // 1. Coincidencias en el catálogo oficial
     const catalogMatches = catalogItems
       .filter(c => c.description && String(c.description).toLowerCase().includes(query))
       .map(c => ({ desc: c.reference ? `[${c.reference}] ${c.description}` : c.description, price: c.price, source: 'Catálogo' }));
     
-    // 2. Coincidencias en el historial de presupuestos pasados
     const historyItems: any[] = [];
     budgets.forEach(b => {
       if (b.items && Array.isArray(b.items)) {
@@ -387,7 +396,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       }
     });
 
-    // Combinar y eliminar duplicados por descripción
     const combined = [...catalogMatches, ...historyItems];
     const unique = [];
     const seen = new Set();
@@ -455,6 +463,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       const pdfBlob = await generatePdfBlob({
           code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
           subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, items: bItems, conditions: bConditions,
+          has_cover: bHasCover, cover_type: bCoverType, cover_text: bCoverText,
           status: editingBudgetId ? budgets.find(b=>b.id===editingBudgetId)?.status || 'pendiente' : 'pendiente', type: 'presupuesto', created_at: new Date().toISOString()
       }, companyData);
 
@@ -476,6 +485,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       const budgetPayload = {
         code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
         subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, pdf_name: `${bCode}.pdf`, items: bItems, conditions: bConditions,
+        has_cover: bHasCover, cover_type: bCoverType, cover_text: bCoverText,
         user_id: user.id, status: editingBudgetId ? budgets.find(b=>b.id===editingBudgetId)?.status || 'pendiente' : 'pendiente', type: 'presupuesto',
         pdf_url: pdfUrl
       };
@@ -833,7 +843,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     } catch (err: any) { alert('Error guardando cliente: ' + err.message); }
   };
 
-  // GESTIÓN DEL CATÁLOGO DE PARTIDAS (AÑADIR, BORRAR E IMPORTAR CSV)
   const handleSaveCatalogItem = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -865,13 +874,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       const newItems = [];
       
       for (let i = 1; i < lines.length; i++) {
-        // Soporta separación por Punto y Coma o Tabulador (típico de Excel)
         const parts = lines[i].split(/[;\t]/);
         if (parts.length >= 2) {
           const ref = parts.length >= 3 ? parts[0].trim() : null;
           const desc = parts.length >= 3 ? parts[1].trim() : parts[0].trim();
           let priceStr = parts.length >= 3 ? parts[2] : parts[1];
-          // Limpiar el precio para pasarlo a float
           const price = parseFloat(priceStr.replace(/[^0-9,-]+/g, '').replace(',', '.'));
           
           if (desc && !isNaN(price)) {
@@ -895,7 +902,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     e.target.value = '';
   };
 
-  // GESTIÓN CATÁLOGO DE CONDICIONES
   const handleSaveCatalogCondition = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -938,6 +944,42 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       const doc = new jsPDF();
       const isFactura = docData.type === 'factura';
 
+      // SI HAY PORTADA, SE CREA UNA PÁGINA INICIAL
+      if (docData.has_cover && !isFactura) {
+        if (compData && compData.logo_url) {
+          const logoBase64 = await getBase64ImageFromUrl(compData.logo_url);
+          if (logoBase64) {
+            doc.addImage(logoBase64, 'PNG', 14, 20, 60, 60, undefined, 'FAST');
+          }
+        }
+
+        doc.setFontSize(26);
+        doc.setTextColor(30, 41, 59);
+        doc.text("PROPUESTA COMERCIAL", 14, 100);
+
+        doc.setFontSize(14);
+        doc.setTextColor(79, 70, 229);
+        doc.text(`Preparado para: ${docData.client}`, 14, 115);
+
+        doc.setFontSize(12);
+        doc.setTextColor(80, 80, 80);
+        doc.text(`Fecha: ${new Date(docData.created_at).toLocaleDateString()}`, 14, 125);
+        if (docData.work_order_ref) {
+          doc.text(`Referencia: ${docData.work_order_ref}`, 14, 132);
+        }
+
+        doc.setFontSize(11);
+        doc.setTextColor(50, 50, 50);
+        const coverTextContent = docData.cover_type === 'corporate' ? (compData?.corporate_cover_text || '') : (docData.cover_text || '');
+        if (coverTextContent) {
+          const splitCover = doc.splitTextToSize(coverTextContent, 180);
+          doc.text(splitCover, 14, 150);
+        }
+
+        doc.addPage();
+      }
+
+      // DISEÑO ESTÁNDAR DEL PRESUPUESTO/FACTURA
       if (compData && compData.logo_url) {
         const logoBase64 = await getBase64ImageFromUrl(compData.logo_url);
         if (logoBase64) {
@@ -1026,7 +1068,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
           currentY += 10;
       }
 
-      // IMPRIMIR CONDICIONES AL FINAL DEL PDF
       if (docData.conditions && docData.conditions.length > 0) {
         currentY += 5;
         doc.setFontSize(11);
@@ -1466,6 +1507,48 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 )}
               </div>
 
+              {/* SECCIÓN PORTADA (NUEVO) */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-black text-indigo-700 text-xs uppercase tracking-widest">Portada / Carta de Presentación</h4>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <span className="text-xs font-bold text-slate-600">Incluir Portada PDF</span>
+                    <input type="checkbox" checked={bHasCover} onChange={(e) => setBHasCover(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+                  </label>
+                </div>
+                
+                {bHasCover && (
+                  <div className="space-y-3 mt-3 pt-3 border-t border-slate-200 animate-in fade-in">
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
+                        <input type="radio" name="coverType" checked={bCoverType === 'corporate'} onChange={() => setBCoverType('corporate')} className="accent-indigo-600" />
+                        Texto Corporativo (Por Defecto)
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
+                        <input type="radio" name="coverType" checked={bCoverType === 'custom'} onChange={() => setBCoverType('custom')} className="accent-indigo-600" />
+                        Texto Personalizado
+                      </label>
+                    </div>
+
+                    {bCoverType === 'custom' && (
+                      <textarea
+                        value={bCoverText}
+                        onChange={(e) => setBCoverText(e.target.value)}
+                        placeholder="Escribe aquí el texto personalizado para este cliente..."
+                        className="w-full p-3 border border-slate-300 rounded-lg focus:border-indigo-500 focus:outline-none transition resize-y min-h-[100px]"
+                      />
+                    )}
+                    {bCoverType === 'corporate' && (
+                      <div className="p-3 bg-white border border-slate-200 rounded-lg text-slate-500 italic text-[10px]">
+                        {companyData?.corporate_cover_text ? 
+                          <span className="line-clamp-3">{companyData.corporate_cover_text}</span> 
+                          : "No tienes configurado ningún texto corporativo en 'Mis Datos'."}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Código Presupuesto</label>
@@ -1481,7 +1564,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 </div>
               </div>
 
-              {/* PARTIDAS DEL PRESUPUESTO */}
               <div className="space-y-2 pt-3 border-t border-slate-200">
                 <div className="flex items-center justify-between mb-1">
                   <h4 className="font-bold text-slate-800">Partidas y Materiales</h4>
@@ -1520,7 +1602,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 ))}
               </div>
 
-              {/* CONDICIONES DEL PRESUPUESTO */}
               <div className="space-y-2 pt-3 border-t border-slate-200">
                 <div className="flex items-center justify-between mb-1">
                   <h4 className="font-bold text-slate-800">Condiciones de la Oferta</h4>
@@ -1798,7 +1879,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                     {restInvoiceModal.activeItemIndex === index && getFilteredItemsSuggestions(item.desc).length > 0 && (
                       <div className="absolute top-[48px] z-50 w-full bg-white border border-slate-200 shadow-xl max-h-40 overflow-y-auto rounded-lg">
                         {getFilteredItemsSuggestions(item.desc).map((sugg, i) => (
-                          <div key={i} onMouseDown={() => { const u = [...restInvoiceModal.items]; u[index].desc = sugg.desc; u[index].price = sugg.price; setRestInvoiceModal(p => ({...p, items: u, activeItemIndex: null})); }} className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 transition">
+                          <div key={i} onClick={() => { const u = [...restInvoiceModal.items]; u[index].desc = sugg.desc; u[index].price = sugg.price; setRestInvoiceModal(p => ({...p, items: u, activeItemIndex: null})); }} className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 transition">
                             <div className="flex justify-between items-start">
                               <span className="font-bold text-slate-800 text-xs">{sugg.desc}</span>
                               <span className="font-black text-indigo-600 ml-3 whitespace-nowrap">{sugg.price} €</span>
@@ -2062,7 +2143,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
-              {/* Formulario Manual */}
               <form onSubmit={handleSaveCatalogItem} className="space-y-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
                 <h4 className="font-bold text-indigo-700 text-sm">Crear Partida Manual</h4>
                 <div className="flex gap-2">
@@ -2082,7 +2162,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg font-bold shadow-md">Guardar en Catálogo</button>
               </form>
 
-              {/* Importador CSV */}
               <div className="space-y-3 text-xs bg-slate-800 p-4 rounded-xl border border-slate-700 text-white flex flex-col justify-center">
                 <h4 className="font-bold text-indigo-300 text-sm">Importar desde Excel / CSV</h4>
                 <p className="text-slate-300 mb-2">Asegúrate de que tu archivo (.csv) tenga 3 columnas separadas por punto y coma (;) en este orden:</p>
@@ -2096,7 +2175,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               </div>
             </div>
 
-            {/* Listado de partidas guardadas */}
             <div className="flex-1 overflow-y-auto mt-4 border-t border-slate-100 pt-4">
               <h4 className="font-bold text-slate-800 mb-3">Partidas Guardadas ({catalogItems.length})</h4>
               <div className="space-y-2">
