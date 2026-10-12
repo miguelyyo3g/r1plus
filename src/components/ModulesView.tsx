@@ -76,7 +76,7 @@ export default function ModulesView({ onOpenModule, userPlan = 'free' }: Modules
           title="Control de Rutas" 
           icon="📍" 
           isLocked={!isPremium}
-          onClick={() => handleProtectedClick('rutas')} 
+          onClick={() => handleProtectedClick('tracking')} // <-- CORRECCIÓN APLICADA AQUÍ ('tracking')
         />
 
         <ModuleCard 
