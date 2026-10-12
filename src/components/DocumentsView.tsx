@@ -4,7 +4,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
+<<<<<<< HEAD
 import jsPDF from 'jspdf';
+=======
+import { jsPDF } from 'jspdf';
+>>>>>>> deploy-v2
 import autoTable from 'jspdf-autotable';
 
 interface DocumentsViewProps {
@@ -21,13 +25,18 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [allExpenses, setAllExpenses] = useState<any[]>([]);
   const [allAttachments, setAllAttachments] = useState<any[]>([]);
   const [userProfile, setUserProfile] = useState<any>(null);
+<<<<<<< HEAD
   
   // NUEVO: Estado para guardar la ficha de la organización (Logo, CIF, Dirección)
   const [companyOrg, setCompanyOrg] = useState<any>(null);
 
+=======
+  const [companyData, setCompanyData] = useState<any>(null);
+>>>>>>> deploy-v2
   const [isLoading, setIsLoading] = useState(true);
 
   const [crmSearchQuery, setCrmSearchQuery] = useState('');
+  const [budgetSearchQuery, setBudgetSearchQuery] = useState('');
 
   const [showAddBudgetModal, setShowAddBudgetModal] = useState(false);
   const [showCatalogItemModal, setShowCatalogItemModal] = useState(false);
@@ -113,9 +122,16 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       setUserProfile(profile);
 
+<<<<<<< HEAD
       if (profile?.organization_id) {
         const { data: orgData } = await supabase.from('organizations').select('*').eq('id', profile.organization_id).single();
         if (orgData) setCompanyOrg(orgData);
+=======
+      // Cargar datos de la empresa para el logo en los PDFs
+      if (profile && profile.organization_id) {
+        const { data: orgData } = await supabase.from('organizations').select('*').eq('id', profile.organization_id).single();
+        setCompanyData(orgData);
+>>>>>>> deploy-v2
       }
 
       let bQ = supabase.from('budgets').select('*').order('created_at', { ascending: false });
@@ -408,10 +424,34 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         }
       }
 
+      // Generate the PDF directly when saving
+      const pdfBlob = await generatePdfBlob({
+          code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
+          subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, items: bItems, 
+          status: editingBudgetId ? budgets.find(b=>b.id===editingBudgetId)?.status || 'pendiente' : 'pendiente', type: 'presupuesto', created_at: new Date().toISOString()
+      }, companyData);
+
+      const cleanClientName = String(bClient || 'Sin_Cliente').replace(/[^a-zA-Z0-9]/g, '_');
+      // Usar date en el path si no hay id todavia para evitar sobreescribir, idealmente deberias guardar y luego el blob
+      const tempPath = editingBudgetId ? editingBudgetId : Date.now();
+      const fileName = `clientes_crm/${cleanClientName}/proyecto_${tempPath}/${bCode}.pdf`;
+      
+      const { error: uploadError } = await supabase.storage.from('chat_attachments').upload(fileName, pdfBlob, { 
+        contentType: 'application/pdf',
+        upsert: true
+      });
+
+      let pdfUrl = '';
+      if (!uploadError) {
+        const { data: publicUrlData } = supabase.storage.from('chat_attachments').getPublicUrl(fileName);
+        pdfUrl = publicUrlData.publicUrl;
+      }
+
       const budgetPayload = {
         code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
         subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, pdf_name: `${bCode}.pdf`, items: bItems, 
-        user_id: user.id, status: editingBudgetId ? budgets.find(b=>b.id===editingBudgetId)?.status || 'pendiente' : 'pendiente', type: 'presupuesto'
+        user_id: user.id, status: editingBudgetId ? budgets.find(b=>b.id===editingBudgetId)?.status || 'pendiente' : 'pendiente', type: 'presupuesto',
+        pdf_url: pdfUrl
       };
 
       if (editingBudgetId) {
@@ -775,16 +815,64 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     } catch (err: any) {}
   };
 
+<<<<<<< HEAD
   // ==========================================
   // GENERACIÓN DE PDF PROFESIONAL CON LOGO
   // ==========================================
   const handleGeneratePdfAction = async (docData: any, method: 'whatsapp' | 'email' | 'download') => {
     setIsGeneratingPdf(true);
+=======
+  // Helper para leer imagen a base64
+  const getBase64ImageFromUrl = async (imageUrl: string) => {
+>>>>>>> deploy-v2
     try {
+      const res = await fetch(imageUrl);
+      const blob = await res.blob();
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {
+      console.warn('No se pudo cargar el logo para PDF', e);
+      return null;
+    }
+  };
+
+  const generatePdfBlob = async (docData: any, compData: any) => {
       const doc = new jsPDF();
       const isFactura = docData.type === 'factura';
 
+<<<<<<< HEAD
       let currentY = 15;
+=======
+      // Insert Logo if available
+      if (compData && compData.logo_url) {
+        const logoBase64 = await getBase64ImageFromUrl(compData.logo_url);
+        if (logoBase64) {
+          // Adjust dimensions as needed, here using a fixed box (e.g., 40x40 max)
+          doc.addImage(logoBase64, 'PNG', 14, 10, 30, 30, undefined, 'FAST');
+        }
+      }
+
+      // Company Info (Top Right)
+      doc.setFontSize(10);
+      doc.setTextColor(50, 50, 50);
+      if (compData) {
+        doc.text(compData.name || 'Empresa', 120, 15);
+        if(compData.tax_id) doc.text(`CIF: ${compData.tax_id}`, 120, 20);
+        if(compData.address) {
+            const compAddress = doc.splitTextToSize(compData.address, 70);
+            doc.text(compAddress, 120, 25);
+        }
+        if(compData.phone) doc.text(`Tel: ${compData.phone}`, 120, 35);
+      }
+
+      doc.setFontSize(22);
+      doc.setTextColor(79, 70, 229); 
+      doc.text(isFactura ? 'FACTURA' : 'PRESUPUESTO', 14, 50);
+>>>>>>> deploy-v2
 
       // 1. SI EXISTE LOGO CORPORATIVO DE LA ORGANIZACIÓN, LO INSERTAMOS ARRIBA
       if (companyOrg?.logo_url) {
@@ -820,6 +908,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       
       doc.setFontSize(8);
       doc.setTextColor(100, 100, 100);
+<<<<<<< HEAD
       let infoY = currentY - (companyOrg?.logo_url ? 14 : 4);
       if (companyOrg?.tax_id) {
         doc.text(`CIF / NIF: ${companyOrg.tax_id}`, companyOrg?.logo_url ? 46 : 14, infoY);
@@ -850,6 +939,18 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       } else if (isFactura) {
         doc.setTextColor(245, 158, 11);
         doc.text(`PENDIENTE DE PAGO`, 195, 42, { align: 'right' });
+=======
+      doc.text(`Código: ${docData.code}`, 14, 58);
+      if (docData.work_order_ref) doc.text(`Ref. Obra: ${docData.work_order_ref}`, 14, 64);
+      doc.text(`Fecha: ${new Date(docData.created_at).toLocaleDateString()}`, 14, docData.work_order_ref ? 70 : 64);
+
+      if (isFactura && docData.status === 'cobrada') {
+        doc.setTextColor(16, 185, 129);
+        doc.text(`ESTADO: COBRADA (${docData.payment_method})`, 14, 76);
+      } else if (isFactura) {
+        doc.setTextColor(245, 158, 11);
+        doc.text(`ESTADO: PENDIENTE DE PAGO`, 14, 76);
+>>>>>>> deploy-v2
       }
 
       // LÍNEA DIVISORIA
@@ -859,6 +960,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       // 3. DATOS DEL CLIENTE (DESTINATARIO)
       doc.setFontSize(11);
       doc.setTextColor(30, 41, 59);
+<<<<<<< HEAD
       doc.text('Datos del Cliente:', 14, 56);
       
       doc.setFontSize(9);
@@ -868,6 +970,16 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       if(docData.address) {
         const addressLines = doc.splitTextToSize(docData.address, 80);
         doc.text(addressLines, 14, 72);
+=======
+      doc.text('Datos del Cliente:', 120, 50);
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(docData.client || 'Cliente', 120, 58);
+      if(docData.client_cif) doc.text(`CIF/NIF: ${docData.client_cif}`, 120, 64);
+      if(docData.address) {
+        const addressLines = doc.splitTextToSize(docData.address, 70);
+        doc.text(addressLines, 120, 70);
+>>>>>>> deploy-v2
       }
 
       // 4. TABLA DE PARTIDAS
@@ -895,10 +1007,38 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       doc.setTextColor(0, 0, 0);
       doc.text(`TOTAL: ${Number(docData.total).toFixed(2)} €`, 195, finalY + 13, { align: 'right' });
 
+      if (compData && compData.bank_accounts && compData.bank_accounts.length > 0 && isFactura) {
+          doc.setFontSize(10);
+          doc.setTextColor(50, 50, 50);
+          doc.text('Cuentas Bancarias:', 14, finalY + 30);
+          let yAcc = finalY + 36;
+          compData.bank_accounts.forEach((acc: any) => {
+              doc.text(`${acc.bankName}: ${acc.iban}`, 14, yAcc);
+              yAcc += 6;
+          });
+      }
+      if (compData && compData.bizum_phone && isFactura) {
+          doc.text(`Bizum: ${compData.bizum_phone}`, 14, finalY + 46);
+      }
+
+      return doc.output('blob');
+  };
+
+  const handleGeneratePdfAction = async (docData: any, method: 'whatsapp' | 'email' | 'download') => {
+    setIsGeneratingPdf(true);
+    try {
+      const pdfBlob = await generatePdfBlob(docData, companyData);
+
       if (method === 'download') {
-        doc.save(`${docData.code}.pdf`);
+        const url = URL.createObjectURL(pdfBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${docData.code}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
       } else {
-        const pdfBlob = doc.output('blob');
         const cleanClientName = String(docData.client || 'Sin_Cliente').replace(/[^a-zA-Z0-9]/g, '_');
         const projectId = docData.parent_id || docData.id;
         const fileName = `clientes_crm/${cleanClientName}/proyecto_${projectId}/${docData.code}.pdf`;
@@ -912,6 +1052,13 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         const { data: publicUrlData } = supabase.storage.from('chat_attachments').getPublicUrl(fileName);
         const pdfUrl = publicUrlData.publicUrl;
 
+        // Save URL to budget if not present
+        if (!docData.pdf_url) {
+            await supabase.from('budgets').update({ pdf_url: pdfUrl }).eq('id', docData.id);
+            setBudgets(prev => prev.map(b => b.id === docData.id ? { ...b, pdf_url: pdfUrl } : b));
+        }
+
+        const isFactura = docData.type === 'factura';
         const docName = isFactura ? 'la factura' : 'el presupuesto';
         const message = `Hola! Aquí tienes ${docName} ${docData.code}.\n\nPuedes descargarlo en PDF oficial desde este enlace seguro:\n${pdfUrl}\n\nUn saludo.`;
 
@@ -936,7 +1083,21 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     }
   };
 
-  const filteredBudgets = budgets.filter(b => docTab === 'presupuestos' ? b.type !== 'factura' && String(b.code || '').startsWith('PRE') : b.type === 'factura' || String(b.code || '').startsWith('FAC'));
+  const filteredBudgets = budgets.filter(b => {
+      const matchesTab = docTab === 'presupuestos' ? b.type !== 'factura' && String(b.code || '').startsWith('PRE') : b.type === 'factura' || String(b.code || '').startsWith('FAC');
+      if (!matchesTab) return false;
+      
+      if (!budgetSearchQuery.trim()) return true;
+      const q = budgetSearchQuery.toLowerCase();
+      return (
+          (b.code && String(b.code).toLowerCase().includes(q)) ||
+          (b.client && String(b.client).toLowerCase().includes(q)) ||
+          (b.client_cif && String(b.client_cif).toLowerCase().includes(q)) ||
+          (b.address && String(b.address).toLowerCase().includes(q)) ||
+          (b.work_order_ref && String(b.work_order_ref).toLowerCase().includes(q))
+      );
+  });
+
   const filteredCrmList = crmClients.filter(c => {
     if (!crmSearchQuery.trim()) return true;
     const q = crmSearchQuery.toLowerCase();
@@ -1002,6 +1163,23 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             />
             {crmSearchQuery && (
               <button onClick={() => setCrmSearchQuery('')} className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600 font-bold">✕</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {(docTab === 'presupuestos' || docTab === 'facturas') && (
+        <div className="shrink-0">
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="🔍 Buscar por código, cliente, CIF, dirección o ref. obra..."
+              value={budgetSearchQuery}
+              onChange={e => setBudgetSearchQuery(e.target.value)}
+              className="w-full p-2.5 pl-3 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white text-xs font-medium focus:outline-none focus:border-indigo-500 shadow-sm transition"
+            />
+            {budgetSearchQuery && (
+              <button onClick={() => setBudgetSearchQuery('')} className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600 font-bold">✕</button>
             )}
           </div>
         </div>
@@ -1076,12 +1254,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               onTouchStart={() => handleDocPressStart(b)}
               onTouchEnd={handleDocPressEnd}
               onTouchMove={handleDocPressEnd}
-              onClick={() => {
-                if (b.type === 'presupuesto' && (!b.status || b.status === 'pendiente')) {
-                  handleOpenAddBudget(b);
-                }
-              }}
-              className={`p-4 bg-white border border-slate-200 rounded-xl shadow-sm space-y-3 relative overflow-hidden transition select-none ${b.type === 'presupuesto' && (!b.status || b.status === 'pendiente') ? 'cursor-pointer hover:border-indigo-400 hover:shadow-md' : ''} ${b.status === 'cobrada' ? 'border-emerald-300 bg-emerald-50/20' : ''}`}
+              className={`p-4 bg-white border border-slate-200 rounded-xl shadow-sm space-y-3 relative overflow-hidden transition select-none ${b.type === 'presupuesto' && (!b.status || b.status === 'pendiente') ? 'hover:border-indigo-400 hover:shadow-md' : ''} ${b.status === 'cobrada' ? 'border-emerald-300 bg-emerald-50/20' : ''}`}
             >
               {b.status === 'aceptado' && <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500"></div>}
               {b.status === 'rechazado' && <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-500"></div>}
@@ -1094,7 +1267,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">{docTab === 'presupuestos' ? '📄' : '🧾'}</span>
                   <div>
-                    <div className="font-black text-slate-800 text-sm">{b.code}</div>
+                    <div className="font-black text-slate-800 text-sm cursor-pointer hover:underline" onClick={() => handleOpenAddBudget(b)}>{b.code}</div>
                     {b.work_order_ref && (
                       <div className="text-[11px] font-bold text-indigo-600">Ref: {b.work_order_ref}</div>
                     )}
@@ -1110,9 +1283,14 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               
               <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-100 pl-2">
                 <button onClick={(e) => { e.stopPropagation(); setSharingDocument(b); }} className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 transition text-white rounded-lg text-[11px] font-bold shadow-md mr-auto">📤 Enviar PDF</button>
+                {b.pdf_url ? (
+                    <a href={b.pdf_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 transition rounded-lg text-[11px] font-bold shadow-sm">👁️ Ver PDF</a>
+                ) : (
+                    <button onClick={(e) => { e.stopPropagation(); handleGeneratePdfAction(b, 'download'); }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg text-[11px] font-bold shadow-sm">⬇️ PDF</button>
+                )}
+                <button onClick={(e) => { e.stopPropagation(); handleOpenAddBudget(b); }} className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 transition text-indigo-700 rounded-lg text-[11px] font-bold border border-indigo-200">✏️ Editar</button>
                 {docTab === 'presupuestos' && (b.status === 'pendiente' || !b.status) && (
                   <>
-                    <button onClick={(e) => { e.stopPropagation(); handleOpenAddBudget(b); }} className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 transition text-indigo-700 rounded-lg text-[11px] font-bold border border-indigo-200">✏️ Editar</button>
                     <button onClick={(e) => { e.stopPropagation(); handleRejectBudget(b.id); }} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 transition text-rose-700 rounded-lg text-[11px] font-bold border border-rose-200">Rechazar</button>
                     <button onClick={(e) => { e.stopPropagation(); handleAcceptBudget(b); }} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 transition text-white rounded-lg text-[11px] font-bold shadow-md">Aceptar Obra</button>
                   </>
@@ -1134,7 +1312,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                       <button onClick={(e) => { e.stopPropagation(); handleOpenPaymentModal(b); }} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 transition text-white rounded-lg text-[11px] font-bold shadow-sm">💶 Cobrar</button>
                     )}
                     <button onClick={(e) => { e.stopPropagation(); handleRevertToBudget(b); }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg text-[11px] font-bold border border-slate-300">🔄 Volver a Presup.</button>
-                    <button onClick={(e) => { e.stopPropagation(); handleGeneratePdfAction(b, 'download'); }} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg text-[11px] font-bold shadow-sm">⬇️ PDF</button>
                   </>
                 )}
               </div>
@@ -1548,7 +1725,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               </div>
               <div className="bg-slate-800 text-white p-3 rounded-lg flex items-center justify-between mt-2 shadow-md">
                 <span className="font-bold uppercase tracking-wider text-slate-300">Total a Facturar Ahora (IVA Inc.)</span>
-                <span className="font-black text-xl text-emerald-400">{calculatedFinalTotalRest.toFixed(2)} €</span>
+                <span className="font-black text-xl text-emerald-400">
+                  {((restInvoiceModal.items.reduce((acc, item) => acc + (Number(item.qty) || 0) * (Number(item.price) || 0), 0) - restInvoiceModal.alreadyInvoicedSubtotal) * 1.21).toFixed(2)} €
+                </span>
               </div>
               <button type="submit" className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-lg shadow-md transition cursor-pointer mt-2 text-sm">Generar Factura Final y Cerrar</button>
             </form>
@@ -1628,25 +1807,25 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                   <div className="grid grid-cols-3 gap-2 bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
                     <div>
                       <span className="text-[9px] uppercase font-bold text-slate-400 block">Total Presup.</span>
-                      <span className="font-black text-sm text-slate-800">{activeClientTotalPresupuestado.toFixed(2)} €</span>
+                      <span className="font-black text-sm text-slate-800">{budgets.filter(b => b.type === 'presupuesto' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).reduce((acc, b) => acc + Number(b.total), 0).toFixed(2)} €</span>
                     </div>
                     <div>
                       <span className="text-[9px] uppercase font-bold text-indigo-500 block">Total Facturado</span>
-                      <span className="font-black text-sm text-indigo-700">{activeClientTotalFacturado.toFixed(2)} €</span>
+                      <span className="font-black text-sm text-indigo-700">{budgets.filter(b => b.type === 'factura' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).reduce((acc, b) => acc + Number(b.total), 0).toFixed(2)} €</span>
                     </div>
                     <div>
                       <span className="text-[9px] uppercase font-bold text-rose-500 block">Pendiente Pago</span>
-                      <span className="font-black text-sm text-rose-600">{activeClientTotalPendiente.toFixed(2)} €</span>
+                      <span className="font-black text-sm text-rose-600">{budgets.filter(b => b.type === 'factura' && b.status !== 'cobrada' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).reduce((acc, b) => acc + Number(b.total), 0).toFixed(2)} €</span>
                     </div>
                   </div>
 
-                  {activeClientBudgets.filter(b => b.type === 'presupuesto').length === 0 ? (
+                  {budgets.filter(b => b.type === 'presupuesto' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).length === 0 ? (
                     <div className="text-center py-10 text-slate-500 font-bold bg-white rounded-xl border border-dashed border-slate-300">
                       No hay proyectos ni presupuestos registrados para este cliente.
                     </div>
                   ) : (
-                    activeClientBudgets.filter(b => b.type === 'presupuesto').map(proj => {
-                      const relatedInvoices = activeClientBudgets.filter(f => f.type === 'factura' && f.parent_id === proj.id);
+                    budgets.filter(b => b.type === 'presupuesto' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).map(proj => {
+                      const relatedInvoices = budgets.filter(f => f.type === 'factura' && f.parent_id === proj.id);
                       const relatedOrder = workOrders.find(wo => wo.budget_id === proj.id);
                       const relatedExpenses = relatedOrder ? allExpenses.filter(e => e.work_order_id === relatedOrder.id) : [];
                       const relatedFiles = relatedOrder ? allAttachments.filter(a => a.work_order_id === relatedOrder.id) : [];
@@ -1669,7 +1848,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                           </div>
 
                           <div className="flex gap-2">
-                            <button onClick={() => handleGeneratePdfAction(proj, 'download')} className="px-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded hover:bg-slate-100">⬇ Ver Presupuesto</button>
+                            {proj.pdf_url ? (
+                                <a href={proj.pdf_url} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1 bg-sky-50 border border-sky-200 text-sky-700 text-[10px] font-bold rounded hover:bg-sky-100">👁️ Ver PDF</a>
+                            ) : (
+                                <button onClick={() => handleGeneratePdfAction(proj, 'download')} className="px-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded hover:bg-slate-100">⬇ Ver PDF</button>
+                            )}
                             <button onClick={() => handleDeleteDocument(proj)} className="px-2.5 py-1 bg-rose-50 border border-rose-200 text-rose-600 text-[10px] font-bold rounded hover:bg-rose-100">🗑 Eliminar Proyecto</button>
                           </div>
 
@@ -1706,7 +1889,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <span className="font-black text-slate-800">{Number(inv.total).toFixed(2)} €</span>
-                                    <button onClick={() => handleGeneratePdfAction(inv, 'download')} className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 text-[9px] font-bold rounded">⬇ PDF</button>
+                                    {inv.pdf_url ? (
+                                        <a href={inv.pdf_url} target="_blank" rel="noopener noreferrer" className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 text-[9px] font-bold rounded">👁️ PDF</a>
+                                    ) : (
+                                        <button onClick={() => handleGeneratePdfAction(inv, 'download')} className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 text-[9px] font-bold rounded">⬇ PDF</button>
+                                    )}
                                     <button onClick={() => handleDeleteDocument(inv)} className="text-rose-500 hover:text-rose-700 font-bold text-xs">✕</button>
                                   </div>
                                 </div>
