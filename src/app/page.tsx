@@ -6,13 +6,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import LoginPage, { AuthUser } from '@/components/LoginPage';
 import ChatView from '@/components/ChatView';
 import CalendarView from '@/components/CalendarView';
-import TrackingView from '@/components/TrackingView'; // <-- TU ARCHIVO ORIGINAL
+import TrackingView from '@/components/TrackingView'; 
 import DocumentsView from '@/components/DocumentsView';
 import ProfileView from '@/components/ProfileView';
 import AdminDashboardView from '@/components/AdminDashboardView';
 import ModulesView from '@/components/ModulesView'; 
 import FreelanceWorksView from '@/components/FreelanceWorksView'; 
 import GamesView from '@/components/GamesView'; 
+import AccountingView from '@/components/AccountingView'; // <-- AÑADIDO
 
 // Importamos los módulos de Layout
 import Header from '@/components/layout/Header';
@@ -28,7 +29,8 @@ interface MainAppViewProps {
 function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps) {
   const getDefaultTab = () => user.role === 'sales_rep' ? 'tracking' : 'chat';
   
-  const [activeTab, setActiveTab] = useState<'chat'|'calendar'|'tracking'|'modules'|'documents'|'works'|'juegos'|'tu'>(getDefaultTab());
+  // <-- AÑADIDO 'accounting' AL ESTADO
+  const [activeTab, setActiveTab] = useState<'chat'|'calendar'|'tracking'|'modules'|'documents'|'works'|'juegos'|'tu'|'accounting'>(getDefaultTab());
   const displayRole = isAdmin ? 'supplier_owner' : user.role;
   
   const tabHistoryRef = useRef<string[]>([getDefaultTab()]);
@@ -95,8 +97,6 @@ function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps)
         <div className="h-full w-full flex flex-col bg-white">
           {activeTab === 'chat' && <ChatView user={user} />}
           {activeTab === 'calendar' && <CalendarView user={user} />}
-          
-          {/* AQUÍ CARGA TU COMPONENTE DE RUTAS ORIGINAL */}
           {activeTab === 'tracking' && <TrackingView user={user} />} 
           
           {activeTab === 'modules' && <ModulesView onOpenModule={handleTabChange} userPlan={user.plan} />} 
@@ -104,13 +104,16 @@ function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps)
           {activeTab === 'works' && <FreelanceWorksView user={user} />}
           {activeTab === 'juegos' && <GamesView />} 
           
+          {/* <-- AÑADIDO: VISTA DE CONTABILIDAD */}
+          {activeTab === 'accounting' && <AccountingView />} 
+          
           {activeTab === 'tu' && <ProfileView user={user} />}
         </div>
       </main>
 
       {/* 3. COMPONENTE MODULAR NAVEGACIÓN INFERIOR */}
       <BottomNav 
-        activeTab={['documents', 'works', 'juegos'].includes(activeTab) ? 'modules' : activeTab}
+        activeTab={['documents', 'works', 'juegos', 'accounting'].includes(activeTab) ? 'modules' : activeTab} // <-- AÑADIDO 'accounting' AQUÍ
         displayRole={displayRole} 
         onTabChange={handleTabChange} 
       />
@@ -129,7 +132,7 @@ export default function Home() {
     setIsLoaded(true);
   }, []);
 
-  const MY_ADMIN_PHONE = '+34600000000'; // <-- Tu número de administrador
+  const MY_ADMIN_PHONE = '+34600000000'; 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.phone === MY_ADMIN_PHONE;
 
   const handleLoginSuccess = (u: AuthUser) => { localStorage.setItem('r1plus_user', JSON.stringify(u)); setCurrentUser(u); };
