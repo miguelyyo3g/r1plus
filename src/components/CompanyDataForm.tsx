@@ -10,6 +10,7 @@ export default function CompanyDataForm() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingCover, setUploadingCover] = useState(false);
   const [message, setMessage] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -20,6 +21,7 @@ export default function CompanyDataForm() {
     address: "",
     phone: "",
     logo_url: "",
+    cover_background_url: "",
     bizum_phone: "",
     corporate_cover_text: "",
   });
@@ -79,6 +81,7 @@ export default function CompanyDataForm() {
             address: org.address || "",
             phone: org.phone || "",
             logo_url: org.logo_url || "",
+            cover_background_url: org.cover_background_url || "",
             bizum_phone: org.bizum_phone || "",
             corporate_cover_text: org.corporate_cover_text || "",
           });
@@ -105,33 +108,48 @@ export default function CompanyDataForm() {
       setUploadingLogo(true);
       setMessage("");
 
-      if (!event.target.files || event.target.files.length === 0) {
-        throw new Error("Debes seleccionar una imagen.");
-      }
-
-      if (!orgId) {
-        throw new Error("No se encontró la empresa para asociar el logo.");
-      }
+      if (!event.target.files || event.target.files.length === 0) throw new Error("Debes seleccionar una imagen.");
+      if (!orgId) throw new Error("No se encontró la empresa para asociar el logo.");
 
       const file = event.target.files[0];
       const fileExt = file.name.split('.').pop();
       const fileName = `logo-${orgId}-${Date.now()}.${fileExt}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('logos')
-        .upload(fileName, file, { upsert: true });
-
+      const { error: uploadError } = await supabase.storage.from('logos').upload(fileName, file, { upsert: true });
       if (uploadError) throw uploadError;
 
       const { data } = supabase.storage.from('logos').getPublicUrl(fileName);
-
       setFormData({ ...formData, logo_url: data.publicUrl });
       setMessage("✅ Imagen subida. Dale a 'Guardar Ficha' para aplicar los cambios.");
-      
     } catch (error: any) {
       setMessage(`❌ Error subiendo imagen: ${error.message}`);
     } finally {
       setUploadingLogo(false);
+    }
+  };
+
+  const uploadCover = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      setUploadingCover(true);
+      setMessage("");
+
+      if (!event.target.files || event.target.files.length === 0) throw new Error("Debes seleccionar una imagen.");
+      if (!orgId) throw new Error("No se encontró la empresa para asociar la portada.");
+
+      const file = event.target.files[0];
+      const fileExt = file.name.split('.').pop();
+      const fileName = `cover-${orgId}-${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage.from('logos').upload(fileName, file, { upsert: true });
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('logos').getPublicUrl(fileName);
+      setFormData({ ...formData, cover_background_url: data.publicUrl });
+      setMessage("✅ Fondo de portada subido. Dale a 'Guardar Ficha' para aplicar los cambios.");
+    } catch (error: any) {
+      setMessage(`❌ Error subiendo portada: ${error.message}`);
+    } finally {
+      setUploadingCover(false);
     }
   };
 
@@ -168,6 +186,7 @@ export default function CompanyDataForm() {
         address: formData.address,
         phone: formData.phone,
         logo_url: formData.logo_url,
+        cover_background_url: formData.cover_background_url,
         bizum_phone: formData.bizum_phone,
         corporate_cover_text: formData.corporate_cover_text,
         bank_accounts: bankAccounts,
@@ -207,24 +226,47 @@ export default function CompanyDataForm() {
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
       <form onSubmit={handleSave} className="space-y-6">
         
-        <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
-          <div className="flex-shrink-0 w-24 h-24 bg-white border border-slate-300 rounded-xl flex items-center justify-center overflow-hidden shadow-sm">
-            {formData.logo_url ? (
-              <img src={formData.logo_url} alt="Logo Empresa" className="w-full h-full object-contain" />
-            ) : (
-              <span className="text-slate-400 text-xs font-bold uppercase tracking-widest text-center px-2">Sin Logo</span>
-            )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
+            <div className="flex-shrink-0 w-24 h-24 bg-white border border-slate-300 rounded-xl flex items-center justify-center overflow-hidden shadow-sm">
+              {formData.logo_url ? (
+                <img src={formData.logo_url} alt="Logo Empresa" className="w-full h-full object-contain" />
+              ) : (
+                <span className="text-slate-400 text-xs font-bold uppercase tracking-widest text-center px-2">Sin Logo</span>
+              )}
+            </div>
+            <div className="flex-1 w-full">
+              <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-widest">Logotipo Corporativo</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={uploadLogo}
+                disabled={uploadingLogo || uploadingCover}
+                className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-black file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer transition"
+              />
+              {uploadingLogo && <p className="text-xs text-indigo-600 mt-2 font-bold animate-pulse">Subiendo logo...</p>}
+            </div>
           </div>
-          <div className="flex-1 w-full">
-            <label className="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-widest">Logotipo Corporativo</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={uploadLogo}
-              disabled={uploadingLogo}
-              className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-black file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer transition"
-            />
-            {uploadingLogo && <p className="text-xs text-indigo-600 mt-2 font-bold animate-pulse">Subiendo imagen...</p>}
+
+          <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-slate-800 rounded-xl border border-slate-700">
+            <div className="flex-shrink-0 w-20 h-28 bg-slate-700 border border-slate-600 rounded-xl flex items-center justify-center overflow-hidden shadow-sm">
+              {formData.cover_background_url ? (
+                <img src={formData.cover_background_url} alt="Fondo Portada" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest text-center px-2">A4 Canva</span>
+              )}
+            </div>
+            <div className="flex-1 w-full text-white">
+              <label className="block text-xs font-bold text-indigo-300 mb-2 uppercase tracking-widest">Fondo Portada PDF</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={uploadCover}
+                disabled={uploadingLogo || uploadingCover}
+                className="block w-full text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-black file:bg-indigo-600 file:text-white hover:file:bg-indigo-500 cursor-pointer transition"
+              />
+              {uploadingCover && <p className="text-xs text-indigo-300 mt-2 font-bold animate-pulse">Subiendo fondo...</p>}
+            </div>
           </div>
         </div>
 
@@ -286,7 +328,7 @@ export default function CompanyDataForm() {
         {/* CARTA DE PRESENTACIÓN CORPORATIVA */}
         <div className="pt-6 border-t border-slate-100">
           <label className="block text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">📄 Carta de Presentación / Portada Corporativa</label>
-          <p className="text-xs text-slate-500 mb-3">Este texto se usará como presentación por defecto en la primera página de tus propuestas comerciales.</p>
+          <p className="text-xs text-slate-500 mb-3">Este texto se usará como presentación por defecto en la primera página de tus propuestas comerciales. (Te recomendamos dejar espacio en blanco en la mitad inferior de tu diseño de Canva para que este texto se imprima encima).</p>
           <textarea
             className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-800 resize-y min-h-[120px]"
             placeholder="Estimado cliente, es un placer presentarle nuestra propuesta comercial..."
@@ -364,7 +406,7 @@ export default function CompanyDataForm() {
 
         <button
           type="submit"
-          disabled={saving || uploadingLogo}
+          disabled={saving || uploadingLogo || uploadingCover}
           className="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 transition-colors disabled:bg-slate-300 cursor-pointer shadow-lg text-sm mt-4"
         >
           {saving ? "Guardando cambios de empresa..." : "Guardar Ficha de Empresa"}

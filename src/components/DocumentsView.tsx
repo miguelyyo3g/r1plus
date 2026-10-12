@@ -56,7 +56,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [bItems, setBItems] = useState<Array<{ desc: string; qty: number; price: number }>>([{ desc: '', qty: 1, price: 0 }]);
   const [bConditions, setBConditions] = useState<Array<{ title: string; description: string }>>([]);
   
-  // PORTADA DEL PRESUPUESTO
   const [bHasCover, setBHasCover] = useState(false);
   const [bCoverType, setBCoverType] = useState<'corporate' | 'custom'>('corporate');
   const [bCoverText, setBCoverText] = useState('');
@@ -932,7 +931,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         reader.readAsDataURL(blob);
       });
     } catch (e) {
-      console.warn('No se pudo cargar el logo para PDF', e);
+      console.warn('No se pudo cargar la imagen para PDF', e);
       return null;
     }
   };
@@ -944,28 +943,40 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       const doc = new jsPDF();
       const isFactura = docData.type === 'factura';
 
-      // SI HAY PORTADA, SE CREA UNA PÁGINA INICIAL
+      // SI HAY PORTADA, SE CREA LA PÁGINA INICIAL CON EL FONDO
       if (docData.has_cover && !isFactura) {
-        if (compData && compData.logo_url) {
+        if (compData && compData.cover_background_url) {
+          const bgBase64 = await getBase64ImageFromUrl(compData.cover_background_url);
+          if (bgBase64) {
+            // Extraer formato para evitar errores
+            const format = bgBase64.substring("data:image/".length, bgBase64.indexOf(";base64"));
+            const finalFormat = format.toUpperCase() === 'JPEG' || format.toUpperCase() === 'JPG' ? 'JPEG' : 'PNG';
+            doc.addImage(bgBase64, finalFormat, 0, 0, 210, 297, undefined, 'FAST');
+          }
+        } else if (compData && compData.logo_url) {
+          // Si no subió fondo pero activó la portada, ponemos su logo centrado arriba
           const logoBase64 = await getBase64ImageFromUrl(compData.logo_url);
           if (logoBase64) {
-            doc.addImage(logoBase64, 'PNG', 14, 20, 60, 60, undefined, 'FAST');
+            const format = logoBase64.substring("data:image/".length, logoBase64.indexOf(";base64"));
+            const finalFormat = format.toUpperCase() === 'JPEG' || format.toUpperCase() === 'JPG' ? 'JPEG' : 'PNG';
+            doc.addImage(logoBase64, finalFormat, 14, 20, 60, 60, undefined, 'FAST');
           }
         }
 
+        // Colocamos el texto de la propuesta dinámicamente en la mitad inferior (Y=140 en adelante)
         doc.setFontSize(26);
         doc.setTextColor(30, 41, 59);
-        doc.text("PROPUESTA COMERCIAL", 14, 100);
+        doc.text("PROPUESTA COMERCIAL", 14, 130);
 
         doc.setFontSize(14);
         doc.setTextColor(79, 70, 229);
-        doc.text(`Preparado para: ${docData.client}`, 14, 115);
+        doc.text(`Preparado para: ${docData.client}`, 14, 145);
 
         doc.setFontSize(12);
         doc.setTextColor(80, 80, 80);
-        doc.text(`Fecha: ${new Date(docData.created_at).toLocaleDateString()}`, 14, 125);
+        doc.text(`Fecha: ${new Date(docData.created_at).toLocaleDateString()}`, 14, 155);
         if (docData.work_order_ref) {
-          doc.text(`Referencia: ${docData.work_order_ref}`, 14, 132);
+          doc.text(`Referencia: ${docData.work_order_ref}`, 14, 162);
         }
 
         doc.setFontSize(11);
@@ -973,7 +984,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         const coverTextContent = docData.cover_type === 'corporate' ? (compData?.corporate_cover_text || '') : (docData.cover_text || '');
         if (coverTextContent) {
           const splitCover = doc.splitTextToSize(coverTextContent, 180);
-          doc.text(splitCover, 14, 150);
+          doc.text(splitCover, 14, 180);
         }
 
         doc.addPage();
@@ -983,7 +994,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       if (compData && compData.logo_url) {
         const logoBase64 = await getBase64ImageFromUrl(compData.logo_url);
         if (logoBase64) {
-          doc.addImage(logoBase64, 'PNG', 14, 10, 30, 30, undefined, 'FAST');
+          const format = logoBase64.substring("data:image/".length, logoBase64.indexOf(";base64"));
+          const finalFormat = format.toUpperCase() === 'JPEG' || format.toUpperCase() === 'JPG' ? 'JPEG' : 'PNG';
+          doc.addImage(logoBase64, finalFormat, 14, 10, 30, 30, undefined, 'FAST');
         }
       }
 
@@ -1507,7 +1520,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 )}
               </div>
 
-              {/* SECCIÓN PORTADA (NUEVO) */}
+              {/* SECCIÓN PORTADA */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="font-black text-indigo-700 text-xs uppercase tracking-widest">Portada / Carta de Presentación</h4>
