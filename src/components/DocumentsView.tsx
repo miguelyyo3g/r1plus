@@ -4,14 +4,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 interface DocumentsViewProps {
   user: any;
 }
 
 export default function DocumentsView({ user }: DocumentsViewProps) {
+  // BLINDAJE 1: Controlar que solo se renderice en el navegador real, no en el servidor de Vercel
+  const [isMounted, setIsMounted] = useState(false);
   const [docTab, setDocTab] = useState<'presupuestos' | 'facturas' | 'ordenes' | 'clientes'>('presupuestos');
   
   const [budgets, setBudgets] = useState<any[]>([]);
@@ -38,13 +38,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [newExpenseAmount, setNewExpenseAmount] = useState<number | ''>('');
   const [woTab, setWoTab] = useState<'info' | 'gastos' | 'archivos'>('info');
 
-  // PRESUPUESTOS Y DATOS DEL CLIENTE
   const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null); 
   const [bCode, setBCode] = useState('');
   const [bWorkOrderRef, setBWorkOrderRef] = useState('');
   const [bValidUntil, setBValidUntil] = useState('');
   
-  // Control inteligente del cliente
   const [bClientId, setBClientId] = useState<string | null>(null);
   const [bClient, setBClient] = useState('');
   const [bCif, setBCif] = useState('');
@@ -100,7 +98,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     return `${prefix}${String(nextNum).padStart(2, '0')}`;
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { 
+    setIsMounted(true);
+    fetchData(); 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -109,7 +111,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       setUserProfile(profile);
 
-      // Cargar datos de la empresa para el logo en los PDFs
       if (profile && profile.organization_id) {
         const { data: orgData } = await supabase.from('organizations').select('*').eq('id', profile.organization_id).single();
         setCompanyData(orgData);
@@ -227,7 +228,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         img.src = event.target?.result as string;
         
         img.onerror = () => {
-          alert('❌ El navegador no puede procesar esta foto. Si es un archivo HEIC, usa la cámara en su lugar.');
+          alert('❌ El navegador no procesa esta foto. Si es HEIC, usa la cámara.');
           setIsScanning(false);
           e.target.value = '';
         };
@@ -405,7 +406,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         }
       }
 
-      // Generate the PDF directly when saving
+      // Generar el PDF dinámicamente
       const pdfBlob = await generatePdfBlob({
           code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
           subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, items: bItems, 
@@ -413,7 +414,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       }, companyData);
 
       const cleanClientName = String(bClient || 'Sin_Cliente').replace(/[^a-zA-Z0-9]/g, '_');
-      // Usar date en el path si no hay id todavia para evitar sobreescribir, idealmente deberias guardar y luego el blob
       const tempPath = editingBudgetId ? editingBudgetId : Date.now();
       const fileName = `clientes_crm/${cleanClientName}/proyecto_${tempPath}/${bCode}.pdf`;
       
@@ -796,7 +796,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     } catch (err: any) {}
   };
 
-  // Helper para leer imagen a base64
   const getBase64ImageFromUrl = async (imageUrl: string) => {
     try {
       const res = await fetch(imageUrl);
@@ -814,19 +813,20 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   };
 
   const generatePdfBlob = async (docData: any, compData: any) => {
+      // BLINDAJE 2: Importamos las librerías dinámicamente SOLO cuando hacen falta
+      const { jsPDF } = (await import('jspdf'));
+      const autoTable = (await import('jspdf-autotable')).default;
+
       const doc = new jsPDF();
       const isFactura = docData.type === 'factura';
 
-      // Insert Logo if available
       if (compData && compData.logo_url) {
         const logoBase64 = await getBase64ImageFromUrl(compData.logo_url);
         if (logoBase64) {
-          // Adjust dimensions as needed, here using a fixed box (e.g., 40x40 max)
           doc.addImage(logoBase64, 'PNG', 14, 10, 30, 30, undefined, 'FAST');
         }
       }
 
-      // Company Info (Top Right)
       doc.setFontSize(10);
       doc.setTextColor(50, 50, 50);
       if (compData) {
@@ -935,7 +935,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         const { data: publicUrlData } = supabase.storage.from('chat_attachments').getPublicUrl(fileName);
         const pdfUrl = publicUrlData.publicUrl;
 
-        // Save URL to budget if not present
         if (!docData.pdf_url) {
             await supabase.from('budgets').update({ pdf_url: pdfUrl }).eq('id', docData.id);
             setBudgets(prev => prev.map(b => b.id === docData.id ? { ...b, pdf_url: pdfUrl } : b));
@@ -1000,6 +999,8 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     facturado: budgets.filter(b => b.type === 'factura').reduce((acc, b) => acc + Number(b.total || 0), 0),
     pendiente: budgets.filter(b => b.type === 'factura' && b.status !== 'cobrada').reduce((acc, b) => acc + Number(b.total || 0), 0),
   };
+
+  if (!isMounted) return null;
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4 shadow-sm h-full flex flex-col overflow-hidden relative">
@@ -1235,7 +1236,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
             <form onSubmit={handleSaveBudget} className="space-y-4 text-xs">
               
-              {/* DATOS DEL CLIENTE INTEGRALES Y COLAPSABLES */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
                 <div className="flex justify-between items-center border-b border-slate-200 pb-2 mb-2">
                   <h4 className="font-black text-indigo-700 text-xs uppercase tracking-widest">Datos del Cliente</h4>
@@ -1274,7 +1274,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                   )}
                 </div>
 
-                {/* VISTA RÁPIDA (Resumen si está colapsado y hay datos) */}
                 {!showAdvancedClientFields && (bCif || bPhone || bAddress || bEmail || bBankAccount || bContact) && (
                   <div className="text-[10px] text-slate-500 font-medium bg-white p-2.5 rounded border border-slate-200">
                     {bCif && <span className="mr-3"><strong>CIF:</strong> {bCif}</span>}
@@ -1286,7 +1285,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                   </div>
                 )}
 
-                {/* CAMPOS AVANZADOS (Desplegables) */}
                 {showAdvancedClientFields && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 pt-3 border-t border-slate-200">
                     <div>
@@ -1317,7 +1315,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 )}
               </div>
 
-              {/* SECCIÓN DEL PROYECTO */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Código Presupuesto</label>
@@ -1333,7 +1330,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 </div>
               </div>
 
-              {/* PARTIDAS DEL PRESUPUESTO */}
               <div className="space-y-2 pt-3 border-t border-slate-200">
                 <div className="flex items-center justify-between mb-1">
                   <h4 className="font-bold text-slate-800">Partidas y Materiales</h4>
