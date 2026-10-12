@@ -24,7 +24,6 @@ export default function CompanyDataForm() {
   });
 
   const [bankAccounts, setBankAccounts] = useState<Array<{ bankName: string; iban: string }>>([]);
-  // ESTADO PARA EL BOTÓN DE BORRADO DE DOBLE CHECK
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -43,7 +42,6 @@ export default function CompanyDataForm() {
         return;
       }
 
-      // 1. Buscamos el perfil del usuario
       const { data: profile } = await supabase
         .from("profiles")
         .select("organization_id, plan, role, name")
@@ -52,7 +50,6 @@ export default function CompanyDataForm() {
 
       let currentOrgId = profile?.organization_id;
 
-      // 2. AUTO-CREACIÓN de empresa
       if (!currentOrgId && (profile?.plan === 'empresa' || profile?.plan === 'empresa_pro' || profile?.role === 'admin' || profile?.role === 'gerente' || profile?.role === 'supplier_owner')) {
          const { data: newOrg } = await supabase
            .from("organizations")
@@ -66,7 +63,6 @@ export default function CompanyDataForm() {
          }
       }
 
-      // 3. Cargamos los datos
       if (currentOrgId) {
         setOrgId(currentOrgId);
         const { data: org } = await supabase
@@ -141,18 +137,14 @@ export default function CompanyDataForm() {
     setBankAccounts([...bankAccounts, { bankName: "", iban: "" }]);
   };
 
-  // NUEVA LÓGICA DE BORRADO EN DOS PASOS
   const handleRemoveAccountClick = (index: number) => {
     if (deletingIndex === index) {
-      // Si ya estaba en modo borrar, procedemos a borrar
       const updated = [...bankAccounts];
       updated.splice(index, 1);
       setBankAccounts(updated);
       setDeletingIndex(null);
     } else {
-      // Primer clic: mostramos confirmación
       setDeletingIndex(index);
-      // Tras 3 segundos, volvemos al estado normal
       setTimeout(() => {
         setDeletingIndex(current => current === index ? null : current);
       }, 3000);
@@ -212,7 +204,6 @@ export default function CompanyDataForm() {
     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
       <form onSubmit={handleSave} className="space-y-6">
         
-        {/* LOGO */}
         <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
           <div className="flex-shrink-0 w-24 h-24 bg-white border border-slate-300 rounded-xl flex items-center justify-center overflow-hidden shadow-sm">
             {formData.logo_url ? (
@@ -234,7 +225,6 @@ export default function CompanyDataForm() {
           </div>
         </div>
 
-        {/* DATOS FISCALES */}
         <div className="space-y-4">
           <div>
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Nombre Comercial / Razón Social</label>
@@ -290,7 +280,6 @@ export default function CompanyDataForm() {
           </div>
         </div>
 
-        {/* CUENTAS BANCARIAS */}
         <div className="space-y-3 pt-6 border-t border-slate-100">
           <div className="flex justify-between items-center mb-2">
             <div>
@@ -368,3 +357,4 @@ export default function CompanyDataForm() {
       </form>
     </div>
   );
+}
