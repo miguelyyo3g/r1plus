@@ -21,6 +21,7 @@ export default function CompanyDataForm() {
     phone: "",
     logo_url: "",
     bizum_phone: "",
+    corporate_cover_text: "",
   });
 
   const [bankAccounts, setBankAccounts] = useState<Array<{ bankName: string; iban: string }>>([]);
@@ -79,6 +80,7 @@ export default function CompanyDataForm() {
             phone: org.phone || "",
             logo_url: org.logo_url || "",
             bizum_phone: org.bizum_phone || "",
+            corporate_cover_text: org.corporate_cover_text || "",
           });
           
           if (org.bank_accounts && Array.isArray(org.bank_accounts)) {
@@ -167,6 +169,7 @@ export default function CompanyDataForm() {
         phone: formData.phone,
         logo_url: formData.logo_url,
         bizum_phone: formData.bizum_phone,
+        corporate_cover_text: formData.corporate_cover_text,
         bank_accounts: bankAccounts,
       })
       .eq("id", orgId);
@@ -278,6 +281,18 @@ export default function CompanyDataForm() {
               onChange={(e) => setFormData({ ...formData, bizum_phone: e.target.value })}
             />
           </div>
+        </div>
+
+        {/* CARTA DE PRESENTACIÓN CORPORATIVA */}
+        <div className="pt-6 border-t border-slate-100">
+          <label className="block text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">📄 Carta de Presentación / Portada Corporativa</label>
+          <p className="text-xs text-slate-500 mb-3">Este texto se usará como presentación por defecto en la primera página de tus propuestas comerciales.</p>
+          <textarea
+            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-medium text-slate-800 resize-y min-h-[120px]"
+            placeholder="Estimado cliente, es un placer presentarle nuestra propuesta comercial..."
+            value={formData.corporate_cover_text}
+            onChange={(e) => setFormData({ ...formData, corporate_cover_text: e.target.value })}
+          />
         </div>
 
         <div className="space-y-3 pt-6 border-t border-slate-100">
