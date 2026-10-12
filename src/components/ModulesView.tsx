@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 
 interface ModulesViewProps {
   onOpenModule: (view: string) => void;
-  userPlan?: string; // NUEVO: Para saber qué plan tiene
+  userPlan?: string;
 }
 
 export default function ModulesView({ onOpenModule, userPlan = 'free' }: ModulesViewProps) {
@@ -38,7 +38,6 @@ export default function ModulesView({ onOpenModule, userPlan = 'free' }: Modules
       onOpenModule(moduleName);
     } else {
       alert("🔒 Este módulo es exclusivo para usuarios Premium.\n\nVe a la pestaña 'Tú' para mejorar tu plan y desbloquear todas las herramientas.");
-      // Opcional: onOpenModule('tu'); // Para mandarlo directo a pagar
     }
   };
 
@@ -81,13 +80,6 @@ export default function ModulesView({ onOpenModule, userPlan = 'free' }: Modules
         />
 
         <ModuleCard 
-          title="Chat y Mensajes" 
-          icon="💬" 
-          isLocked={!isPremium}
-          onClick={() => handleProtectedClick('chat')} 
-        />
-
-        <ModuleCard 
           title="Mediciones" 
           icon="📏" 
           isLocked={!isPremium}
@@ -96,17 +88,9 @@ export default function ModulesView({ onOpenModule, userPlan = 'free' }: Modules
 
         {/* MÓDULOS FREE (Siempre abiertos) */}
         <ModuleCard 
-          title="Config. Empresa" 
-          icon="🏢" 
-          isLocked={false} // Siempre abierto para que puedan editar su perfil
-          onClick={() => onOpenModule('empresa')} 
-          customClass="bg-slate-800 border-slate-700 hover:bg-slate-900 text-white"
-        />
-
-        <ModuleCard 
           title="Sala de Juegos" 
           icon="🎮" 
-          isLocked={false} // Siempre abierto
+          isLocked={false}
           onClick={() => onOpenModule('juegos')} 
           customClass="bg-rose-50 border-rose-200 hover:border-rose-400 hover:bg-rose-100"
         />
@@ -116,7 +100,6 @@ export default function ModulesView({ onOpenModule, userPlan = 'free' }: Modules
   );
 }
 
-// Subcomponente de la tarjeta actualizado para soportar el "modo bloqueado" y color de texto adaptativo
 function ModuleCard({ title, icon, onClick, customClass = '', isLocked = false }: { title: string, icon: string, onClick: () => void, customClass?: string, isLocked?: boolean }) {
   if (isLocked) {
     return (
@@ -131,7 +114,6 @@ function ModuleCard({ title, icon, onClick, customClass = '', isLocked = false }
   }
 
   const baseClass = customClass ? customClass : "bg-white border-slate-200 hover:border-indigo-300";
-  // Si la clase custom tiene bg-slate-800, el texto debe ser blanco en lugar de slate-700
   const textClass = customClass.includes('bg-slate-800') ? 'text-slate-100' : 'text-slate-700';
 
   return (
