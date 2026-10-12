@@ -81,6 +81,13 @@ export default function ModulesView({ onOpenModule, userPlan = 'free' }: Modules
         />
 
         <ModuleCard 
+          title="Chat y Mensajes" 
+          icon="💬" 
+          isLocked={!isPremium}
+          onClick={() => handleProtectedClick('chat')} 
+        />
+
+        <ModuleCard 
           title="Mediciones" 
           icon="📏" 
           isLocked={!isPremium}
@@ -88,6 +95,14 @@ export default function ModulesView({ onOpenModule, userPlan = 'free' }: Modules
         />
 
         {/* MÓDULOS FREE (Siempre abiertos) */}
+        <ModuleCard 
+          title="Config. Empresa" 
+          icon="🏢" 
+          isLocked={false} // Siempre abierto para que puedan editar su perfil
+          onClick={() => onOpenModule('empresa')} 
+          customClass="bg-slate-800 border-slate-700 hover:bg-slate-900 text-white"
+        />
+
         <ModuleCard 
           title="Sala de Juegos" 
           icon="🎮" 
@@ -101,7 +116,7 @@ export default function ModulesView({ onOpenModule, userPlan = 'free' }: Modules
   );
 }
 
-// Subcomponente de la tarjeta actualizado para soportar el "modo bloqueado"
+// Subcomponente de la tarjeta actualizado para soportar el "modo bloqueado" y color de texto adaptativo
 function ModuleCard({ title, icon, onClick, customClass = '', isLocked = false }: { title: string, icon: string, onClick: () => void, customClass?: string, isLocked?: boolean }) {
   if (isLocked) {
     return (
@@ -116,10 +131,13 @@ function ModuleCard({ title, icon, onClick, customClass = '', isLocked = false }
   }
 
   const baseClass = customClass ? customClass : "bg-white border-slate-200 hover:border-indigo-300";
+  // Si la clase custom tiene bg-slate-800, el texto debe ser blanco en lugar de slate-700
+  const textClass = customClass.includes('bg-slate-800') ? 'text-slate-100' : 'text-slate-700';
+
   return (
     <button onClick={onClick} className={`p-5 rounded-2xl border shadow-sm hover:shadow-md transition-all flex flex-col items-center justify-center gap-3 active:scale-95 cursor-pointer ${baseClass}`}>
       <span className="text-4xl">{icon}</span>
-      <span className="text-xs font-bold text-slate-700 text-center leading-tight">{title}</span>
+      <span className={`text-xs font-bold text-center leading-tight ${textClass}`}>{title}</span>
     </button>
   );
 }
