@@ -4,18 +4,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-<<<<<<< HEAD
-import jsPDF from 'jspdf';
-=======
-import { jsPDF } from 'jspdf';
->>>>>>> deploy-v2
-import autoTable from 'jspdf-autotable';
 
 interface DocumentsViewProps {
   user: any;
 }
 
 export default function DocumentsView({ user }: DocumentsViewProps) {
+  // BLINDAJE 1: Controlar que solo se renderice en el navegador real, no en el servidor de Vercel
+  const [isMounted, setIsMounted] = useState(false);
   const [docTab, setDocTab] = useState<'presupuestos' | 'facturas' | 'ordenes' | 'clientes'>('presupuestos');
   
   const [budgets, setBudgets] = useState<any[]>([]);
@@ -25,14 +21,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [allExpenses, setAllExpenses] = useState<any[]>([]);
   const [allAttachments, setAllAttachments] = useState<any[]>([]);
   const [userProfile, setUserProfile] = useState<any>(null);
-<<<<<<< HEAD
-  
-  // NUEVO: Estado para guardar la ficha de la organización (Logo, CIF, Dirección)
-  const [companyOrg, setCompanyOrg] = useState<any>(null);
-
-=======
   const [companyData, setCompanyData] = useState<any>(null);
->>>>>>> deploy-v2
   const [isLoading, setIsLoading] = useState(true);
 
   const [crmSearchQuery, setCrmSearchQuery] = useState('');
@@ -49,13 +38,11 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [newExpenseAmount, setNewExpenseAmount] = useState<number | ''>('');
   const [woTab, setWoTab] = useState<'info' | 'gastos' | 'archivos'>('info');
 
-  // PRESUPUESTOS Y DATOS DEL CLIENTE
   const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null); 
   const [bCode, setBCode] = useState('');
   const [bWorkOrderRef, setBWorkOrderRef] = useState('');
   const [bValidUntil, setBValidUntil] = useState('');
   
-  // Control inteligente del cliente
   const [bClientId, setBClientId] = useState<string | null>(null);
   const [bClient, setBClient] = useState('');
   const [bCif, setBCif] = useState('');
@@ -111,27 +98,22 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     return `${prefix}${String(nextNum).padStart(2, '0')}`;
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { 
+    setIsMounted(true);
+    fetchData(); 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
       if (!user || !user.id) return;
-
-      // 1. Cargamos perfil y datos de la empresa corporativa (Organización)
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       setUserProfile(profile);
 
-<<<<<<< HEAD
-      if (profile?.organization_id) {
-        const { data: orgData } = await supabase.from('organizations').select('*').eq('id', profile.organization_id).single();
-        if (orgData) setCompanyOrg(orgData);
-=======
-      // Cargar datos de la empresa para el logo en los PDFs
       if (profile && profile.organization_id) {
         const { data: orgData } = await supabase.from('organizations').select('*').eq('id', profile.organization_id).single();
         setCompanyData(orgData);
->>>>>>> deploy-v2
       }
 
       let bQ = supabase.from('budgets').select('*').order('created_at', { ascending: false });
@@ -246,7 +228,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         img.src = event.target?.result as string;
         
         img.onerror = () => {
-          alert('❌ El navegador no puede procesar esta foto. Si es un archivo HEIC, usa la cámara en su lugar.');
+          alert('❌ El navegador no procesa esta foto. Si es HEIC, usa la cámara.');
           setIsScanning(false);
           e.target.value = '';
         };
@@ -424,7 +406,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         }
       }
 
-      // Generate the PDF directly when saving
+      // Generar el PDF dinámicamente
       const pdfBlob = await generatePdfBlob({
           code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
           subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, items: bItems, 
@@ -432,7 +414,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       }, companyData);
 
       const cleanClientName = String(bClient || 'Sin_Cliente').replace(/[^a-zA-Z0-9]/g, '_');
-      // Usar date en el path si no hay id todavia para evitar sobreescribir, idealmente deberias guardar y luego el blob
       const tempPath = editingBudgetId ? editingBudgetId : Date.now();
       const fileName = `clientes_crm/${cleanClientName}/proyecto_${tempPath}/${bCode}.pdf`;
       
@@ -815,16 +796,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     } catch (err: any) {}
   };
 
-<<<<<<< HEAD
-  // ==========================================
-  // GENERACIÓN DE PDF PROFESIONAL CON LOGO
-  // ==========================================
-  const handleGeneratePdfAction = async (docData: any, method: 'whatsapp' | 'email' | 'download') => {
-    setIsGeneratingPdf(true);
-=======
-  // Helper para leer imagen a base64
   const getBase64ImageFromUrl = async (imageUrl: string) => {
->>>>>>> deploy-v2
     try {
       const res = await fetch(imageUrl);
       const blob = await res.blob();
@@ -841,22 +813,20 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   };
 
   const generatePdfBlob = async (docData: any, compData: any) => {
+      // BLINDAJE 2: Importamos las librerías dinámicamente SOLO cuando hacen falta
+      const { jsPDF } = (await import('jspdf'));
+      const autoTable = (await import('jspdf-autotable')).default;
+
       const doc = new jsPDF();
       const isFactura = docData.type === 'factura';
 
-<<<<<<< HEAD
-      let currentY = 15;
-=======
-      // Insert Logo if available
       if (compData && compData.logo_url) {
         const logoBase64 = await getBase64ImageFromUrl(compData.logo_url);
         if (logoBase64) {
-          // Adjust dimensions as needed, here using a fixed box (e.g., 40x40 max)
           doc.addImage(logoBase64, 'PNG', 14, 10, 30, 30, undefined, 'FAST');
         }
       }
 
-      // Company Info (Top Right)
       doc.setFontSize(10);
       doc.setTextColor(50, 50, 50);
       if (compData) {
@@ -872,74 +842,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       doc.setFontSize(22);
       doc.setTextColor(79, 70, 229); 
       doc.text(isFactura ? 'FACTURA' : 'PRESUPUESTO', 14, 50);
->>>>>>> deploy-v2
 
-      // 1. SI EXISTE LOGO CORPORATIVO DE LA ORGANIZACIÓN, LO INSERTAMOS ARRIBA
-      if (companyOrg?.logo_url) {
-        try {
-          // Cargamos la imagen mediante una promesa para asegurarnos de que se dibuje
-          const imgData = await new Promise<string>((resolve, reject) => {
-            const image = new Image();
-            image.crossOrigin = 'anonymous';
-            image.src = companyOrg.logo_url;
-            image.onload = () => {
-              const canvas = document.createElement('canvas');
-              canvas.width = image.width;
-              canvas.height = image.height;
-              const ctx = canvas.getContext('2d');
-              ctx?.drawImage(image, 0, 0);
-              resolve(canvas.toDataURL('image/png'));
-            };
-            image.onerror = (err) => reject(err);
-          });
-
-          // Dibujamos el logo en el PDF (coordenada X: 14, Y: 15, Ancho: 30, Alto: automático o proporcional)
-          doc.addImage(imgData, 'PNG', 14, currentY, 28, 28);
-          currentY += 32; // Bajamos el cursor Y para que no se solape
-        } catch (logoErr) {
-          console.warn("No se pudo incrustar el logo en el PDF, continuando sin él...", logoErr);
-        }
-      }
-
-      // 2. DATOS FISCALES DE LA EMPRESA EMISORA (A LA IZQUIERDA O JUNTO AL LOGO)
-      doc.setFontSize(14);
-      doc.setTextColor(30, 41, 59);
-      doc.text(companyOrg?.name || userProfile?.name || 'Empresa Colaboradora', companyOrg?.logo_url ? 46 : 14, currentY - (companyOrg?.logo_url ? 20 : 0));
-      
-      doc.setFontSize(8);
+      doc.setFontSize(10);
       doc.setTextColor(100, 100, 100);
-<<<<<<< HEAD
-      let infoY = currentY - (companyOrg?.logo_url ? 14 : 4);
-      if (companyOrg?.tax_id) {
-        doc.text(`CIF / NIF: ${companyOrg.tax_id}`, companyOrg?.logo_url ? 46 : 14, infoY);
-        infoY += 4;
-      }
-      if (companyOrg?.address) {
-        doc.text(companyOrg.address, companyOrg?.logo_url ? 46 : 14, infoY);
-        infoY += 4;
-      }
-      if (companyOrg?.phone) {
-        doc.text(`Tel: ${companyOrg.phone}`, companyOrg?.logo_url ? 46 : 14, infoY);
-      }
-
-      // TÍTULO DEL DOCUMENTO (A LA DERECHA)
-      doc.setFontSize(20);
-      doc.setTextColor(79, 70, 229); 
-      doc.text(isFactura ? 'FACTURA' : 'PRESUPUESTO', 195, 20, { align: 'right' });
-
-      doc.setFontSize(9);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`Ref: ${docData.code}`, 195, 26, { align: 'right' });
-      if (docData.work_order_ref) doc.text(`Obra: ${docData.work_order_ref}`, 195, 31, { align: 'right' });
-      doc.text(`Fecha: ${new Date(docData.created_at).toLocaleDateString()}`, 195, docData.work_order_ref ? 36 : 31, { align: 'right' });
-
-      if (isFactura && docData.status === 'cobrada') {
-        doc.setTextColor(16, 185, 129);
-        doc.text(`PAGADA (${docData.payment_method})`, 195, 42, { align: 'right' });
-      } else if (isFactura) {
-        doc.setTextColor(245, 158, 11);
-        doc.text(`PENDIENTE DE PAGO`, 195, 42, { align: 'right' });
-=======
       doc.text(`Código: ${docData.code}`, 14, 58);
       if (docData.work_order_ref) doc.text(`Ref. Obra: ${docData.work_order_ref}`, 14, 64);
       doc.text(`Fecha: ${new Date(docData.created_at).toLocaleDateString()}`, 14, docData.work_order_ref ? 70 : 64);
@@ -950,27 +855,10 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       } else if (isFactura) {
         doc.setTextColor(245, 158, 11);
         doc.text(`ESTADO: PENDIENTE DE PAGO`, 14, 76);
->>>>>>> deploy-v2
       }
 
-      // LÍNEA DIVISORIA
-      doc.setDrawColor(226, 232, 240);
-      doc.line(14, 48, 195, 48);
-
-      // 3. DATOS DEL CLIENTE (DESTINATARIO)
-      doc.setFontSize(11);
+      doc.setFontSize(12);
       doc.setTextColor(30, 41, 59);
-<<<<<<< HEAD
-      doc.text('Datos del Cliente:', 14, 56);
-      
-      doc.setFontSize(9);
-      doc.setTextColor(100, 100, 100);
-      doc.text(docData.client || 'Particular', 14, 62);
-      if(docData.client_cif) doc.text(`CIF/NIF: ${docData.client_cif}`, 14, 67);
-      if(docData.address) {
-        const addressLines = doc.splitTextToSize(docData.address, 80);
-        doc.text(addressLines, 14, 72);
-=======
       doc.text('Datos del Cliente:', 120, 50);
       doc.setFontSize(10);
       doc.setTextColor(100, 100, 100);
@@ -979,10 +867,8 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       if(docData.address) {
         const addressLines = doc.splitTextToSize(docData.address, 70);
         doc.text(addressLines, 120, 70);
->>>>>>> deploy-v2
       }
 
-      // 4. TABLA DE PARTIDAS
       const itemsList = docData.items || [];
       const tableData = itemsList.map((item: any) => [
         item.desc, item.qty, `${Number(item.price).toFixed(2)} €`, `${(Number(item.qty) * Number(item.price)).toFixed(2)} €`
@@ -993,19 +879,16 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         head: [['Descripción', 'Cantidad', 'Precio Unit.', 'Total']],
         body: tableData,
         theme: 'striped',
-        headStyles: { fillColor: [79, 70, 229] },
-        styles: { fontSize: 9 }
+        headStyles: { fillColor: [79, 70, 229] }
       });
 
-      // 5. TOTALES
       const finalY = (doc as any).lastAutoTable.finalY + 10;
-      doc.setFontSize(9);
-      doc.text(`Subtotal: ${Number(docData.subtotal).toFixed(2)} €`, 195, finalY, { align: 'right' });
-      doc.text(`IVA (21%): ${Number(docData.vat).toFixed(2)} €`, 195, finalY + 5, { align: 'right' });
-      
-      doc.setFontSize(11);
+      doc.setFontSize(10);
+      doc.text(`Subtotal: ${Number(docData.subtotal).toFixed(2)} €`, 130, finalY);
+      doc.text(`IVA (21%): ${Number(docData.vat).toFixed(2)} €`, 130, finalY + 6);
+      doc.setFontSize(12);
       doc.setTextColor(0, 0, 0);
-      doc.text(`TOTAL: ${Number(docData.total).toFixed(2)} €`, 195, finalY + 13, { align: 'right' });
+      doc.text(`TOTAL: ${Number(docData.total).toFixed(2)} €`, 130, finalY + 14);
 
       if (compData && compData.bank_accounts && compData.bank_accounts.length > 0 && isFactura) {
           doc.setFontSize(10);
@@ -1052,7 +935,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         const { data: publicUrlData } = supabase.storage.from('chat_attachments').getPublicUrl(fileName);
         const pdfUrl = publicUrlData.publicUrl;
 
-        // Save URL to budget if not present
         if (!docData.pdf_url) {
             await supabase.from('budgets').update({ pdf_url: pdfUrl }).eq('id', docData.id);
             setBudgets(prev => prev.map(b => b.id === docData.id ? { ...b, pdf_url: pdfUrl } : b));
@@ -1117,6 +999,8 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     facturado: budgets.filter(b => b.type === 'factura').reduce((acc, b) => acc + Number(b.total || 0), 0),
     pendiente: budgets.filter(b => b.type === 'factura' && b.status !== 'cobrada').reduce((acc, b) => acc + Number(b.total || 0), 0),
   };
+
+  if (!isMounted) return null;
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4 shadow-sm h-full flex flex-col overflow-hidden relative">
@@ -1352,7 +1236,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
             <form onSubmit={handleSaveBudget} className="space-y-4 text-xs">
               
-              {/* DATOS DEL CLIENTE INTEGRALES Y COLAPSABLES */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
                 <div className="flex justify-between items-center border-b border-slate-200 pb-2 mb-2">
                   <h4 className="font-black text-indigo-700 text-xs uppercase tracking-widest">Datos del Cliente</h4>
@@ -1391,7 +1274,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                   )}
                 </div>
 
-                {/* VISTA RÁPIDA (Resumen si está colapsado y hay datos) */}
                 {!showAdvancedClientFields && (bCif || bPhone || bAddress || bEmail || bBankAccount || bContact) && (
                   <div className="text-[10px] text-slate-500 font-medium bg-white p-2.5 rounded border border-slate-200">
                     {bCif && <span className="mr-3"><strong>CIF:</strong> {bCif}</span>}
@@ -1403,7 +1285,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                   </div>
                 )}
 
-                {/* CAMPOS AVANZADOS (Desplegables) */}
                 {showAdvancedClientFields && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 pt-3 border-t border-slate-200">
                     <div>
@@ -1434,7 +1315,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 )}
               </div>
 
-              {/* SECCIÓN DEL PROYECTO */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-bold text-slate-600 mb-1 text-[10px] uppercase">Código Presupuesto</label>
@@ -1450,7 +1330,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 </div>
               </div>
 
-              {/* PARTIDAS DEL PRESUPUESTO */}
               <div className="space-y-2 pt-3 border-t border-slate-200">
                 <div className="flex items-center justify-between mb-1">
                   <h4 className="font-bold text-slate-800">Partidas y Materiales</h4>
