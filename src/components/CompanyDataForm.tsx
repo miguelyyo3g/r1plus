@@ -24,6 +24,8 @@ export default function CompanyDataForm() {
   });
 
   const [bankAccounts, setBankAccounts] = useState<Array<{ bankName: string; iban: string }>>([]);
+  // ESTADO PARA EL BOTÓN DE BORRADO DE DOBLE CHECK
+  const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
 
   useEffect(() => {
     setIsMounted(true);
@@ -41,7 +43,7 @@ export default function CompanyDataForm() {
         return;
       }
 
-      // 1. Buscamos el perfil del usuario para ver si tiene empresa
+      // 1. Buscamos el perfil del usuario
       const { data: profile } = await supabase
         .from("profiles")
         .select("organization_id, plan, role, name")
@@ -50,9 +52,9 @@ export default function CompanyDataForm() {
 
       let currentOrgId = profile?.organization_id;
 
-      // 2. AUTO-CREACIÓN: Si no tiene empresa pero es gerente, se la creamos al instante
+      // 2. AUTO-CREACIÓN de empresa
       if (!currentOrgId && (profile?.plan === 'empresa' || profile?.plan === 'empresa_pro' || profile?.role === 'admin' || profile?.role === 'gerente' || profile?.role === 'supplier_owner')) {
-         const { data: newOrg, error: orgError } = await supabase
+         const { data: newOrg } = await supabase
            .from("organizations")
            .insert([{ name: `Empresa de ${profile.name || 'Usuario'}` }])
            .select("id")
@@ -64,7 +66,7 @@ export default function CompanyDataForm() {
          }
       }
 
-      // 3. Cargamos los datos de la empresa para rellenar el formulario
+      // 3. Cargamos los datos
       if (currentOrgId) {
         setOrgId(currentOrgId);
         const { data: org } = await supabase
@@ -139,10 +141,22 @@ export default function CompanyDataForm() {
     setBankAccounts([...bankAccounts, { bankName: "", iban: "" }]);
   };
 
-  const handleRemoveAccount = (index: number) => {
-    const updated = [...bankAccounts];
-    updated.splice(index, 1);
-    setBankAccounts(updated);
+  // NUEVA LÓGICA DE BORRADO EN DOS PASOS
+  const handleRemoveAccountClick = (index: number) => {
+    if (deletingIndex === index) {
+      // Si ya estaba en modo borrar, procedemos a borrar
+      const updated = [...bankAccounts];
+      updated.splice(index, 1);
+      setBankAccounts(updated);
+      setDeletingIndex(null);
+    } else {
+      // Primer clic: mostramos confirmación
+      setDeletingIndex(index);
+      // Tras 3 segundos, volvemos al estado normal
+      setTimeout(() => {
+        setDeletingIndex(current => current === index ? null : current);
+      }, 3000);
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -324,11 +338,15 @@ export default function CompanyDataForm() {
               />
               <button
                 type="button"
-                onClick={() => handleRemoveAccount(index)}
+                onClick={() => handleRemoveAccountClick(index)}
                 title="Eliminar cuenta"
-                className="px-4 py-3 bg-rose-50 text-rose-600 rounded-lg text-sm font-black hover:bg-rose-100 transition cursor-pointer"
+                className={`py-3 rounded-lg text-sm font-black transition cursor-pointer whitespace-nowrap ${
+                  deletingIndex === index 
+                    ? 'px-4 bg-rose-600 text-white shadow-md animate-pulse' 
+                    : 'px-4 bg-rose-50 text-rose-600 hover:bg-rose-100'
+                }`}
               >
-                ✕
+                {deletingIndex === index ? '¿Seguro?' : '✕'}
               </button>
             </div>
           ))}
