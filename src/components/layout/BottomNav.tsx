@@ -6,10 +6,9 @@ interface BottomNavProps {
   activeTab: string;
   displayRole: string;
   onTabChange: (tab: any) => void;
-  onOpenCompanyModal?: () => void;
 }
 
-export default function BottomNav({ activeTab, displayRole, onTabChange, onOpenCompanyModal }: BottomNavProps) {
+export default function BottomNav({ activeTab, displayRole, onTabChange }: BottomNavProps) {
   const navItems = [
     { id: 'chat', icon: '💬', label: 'Chats', always: true },
     { id: 'calendar', icon: '📅', label: 'Agenda', always: true },
@@ -34,16 +33,6 @@ export default function BottomNav({ activeTab, displayRole, onTabChange, onOpenC
           </button>
         );
       })}
-
-      {/* BOTÓN RÁPIDO DE EMPRESA Y LOGO */}
-      <button 
-        onClick={onOpenCompanyModal}
-        title="Gestionar Datos de Empresa y Logo"
-        className="flex flex-col items-center justify-center w-14 h-full text-indigo-700 bg-indigo-50/50 hover:bg-indigo-100 transition border-l border-slate-100 cursor-pointer"
-      >
-        <span className="text-xl mb-0.5">🏢</span>
-        <span className="text-[10px] font-black">Empresa</span>
-      </button>
     </nav>
   );
 }

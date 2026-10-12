@@ -6,13 +6,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import LoginPage, { AuthUser } from '@/components/LoginPage';
 import ChatView from '@/components/ChatView';
 import CalendarView from '@/components/CalendarView';
-import TrackingView from '@/components/TrackingView';
+import TrackingView from '@/components/TrackingView'; // <-- TU ARCHIVO ORIGINAL
 import DocumentsView from '@/components/DocumentsView';
 import ProfileView from '@/components/ProfileView';
 import AdminDashboardView from '@/components/AdminDashboardView';
 import ModulesView from '@/components/ModulesView'; 
 import FreelanceWorksView from '@/components/FreelanceWorksView'; 
-import GamesView from '@/components/GamesView'; // <-- NUEVO: Importamos la vista de juegos
+import GamesView from '@/components/GamesView'; 
 
 // Importamos los módulos de Layout
 import Header from '@/components/layout/Header';
@@ -28,7 +28,6 @@ interface MainAppViewProps {
 function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps) {
   const getDefaultTab = () => user.role === 'sales_rep' ? 'tracking' : 'chat';
   
-  // Añadimos 'juegos' a los tipos permitidos
   const [activeTab, setActiveTab] = useState<'chat'|'calendar'|'tracking'|'modules'|'documents'|'works'|'juegos'|'tu'>(getDefaultTab());
   const displayRole = isAdmin ? 'supplier_owner' : user.role;
   
@@ -96,13 +95,14 @@ function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps)
         <div className="h-full w-full flex flex-col bg-white">
           {activeTab === 'chat' && <ChatView user={user} />}
           {activeTab === 'calendar' && <CalendarView user={user} />}
-          {activeTab === 'tracking' && <TrackingView user={user} />}
           
-          {/* Aquí están las rutas del Centro de Módulos y sus sub-herramientas */}
+          {/* AQUÍ CARGA TU COMPONENTE DE RUTAS ORIGINAL */}
+          {activeTab === 'tracking' && <TrackingView user={user} />} 
+          
           {activeTab === 'modules' && <ModulesView onOpenModule={handleTabChange} userPlan={user.plan} />} 
           {activeTab === 'documents' && <DocumentsView user={user} />}
           {activeTab === 'works' && <FreelanceWorksView user={user} />}
-          {activeTab === 'juegos' && <GamesView />} {/* <-- NUEVO: Ruta para cargar el módulo de juegos */}
+          {activeTab === 'juegos' && <GamesView />} 
           
           {activeTab === 'tu' && <ProfileView user={user} />}
         </div>
@@ -110,8 +110,7 @@ function MainAppView({ user, isAdmin, onLogout, onOpenAdmin }: MainAppViewProps)
 
       {/* 3. COMPONENTE MODULAR NAVEGACIÓN INFERIOR */}
       <BottomNav 
-        // Mantiene iluminado el icono de módulos si estás en alguna de sus sub-herramientas
-        activeTab={['documents', 'works', 'juegos'].includes(activeTab) ? 'modules' : activeTab} // <-- NUEVO: Incluido 'juegos' en el array de iluminación
+        activeTab={['documents', 'works', 'juegos'].includes(activeTab) ? 'modules' : activeTab}
         displayRole={displayRole} 
         onTabChange={handleTabChange} 
       />
