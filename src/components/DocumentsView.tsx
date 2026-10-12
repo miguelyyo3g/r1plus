@@ -10,7 +10,6 @@ interface DocumentsViewProps {
 }
 
 export default function DocumentsView({ user }: DocumentsViewProps) {
-  // BLINDAJE 1: Controlar que solo se renderice en el navegador real, no en el servidor de Vercel
   const [isMounted, setIsMounted] = useState(false);
   const [docTab, setDocTab] = useState<'presupuestos' | 'facturas' | 'ordenes' | 'clientes'>('presupuestos');
   
@@ -18,6 +17,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [workOrders, setWorkOrders] = useState<any[]>([]);
   const [crmClients, setCrmClients] = useState<any[]>([]);
   const [catalogItems, setCatalogItems] = useState<any[]>([]);
+  const [catalogConditions, setCatalogConditions] = useState<any[]>([]);
   const [allExpenses, setAllExpenses] = useState<any[]>([]);
   const [allAttachments, setAllAttachments] = useState<any[]>([]);
   const [userProfile, setUserProfile] = useState<any>(null);
@@ -29,6 +29,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
   const [showAddBudgetModal, setShowAddBudgetModal] = useState(false);
   const [showCatalogItemModal, setShowCatalogItemModal] = useState(false);
+  const [showConditionCatalogModal, setShowConditionCatalogModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   
   const [activeWorkOrder, setActiveWorkOrder] = useState<any | null>(null);
@@ -52,6 +53,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [bContact, setBContact] = useState(''); 
   const [bBankAccount, setBBankAccount] = useState(''); 
   const [bItems, setBItems] = useState<Array<{ desc: string; qty: number; price: number }>>([{ desc: '', qty: 1, price: 0 }]);
+  const [bConditions, setBConditions] = useState<Array<{ title: string; description: string }>>([]);
 
   const [showAdvancedClientFields, setShowAdvancedClientFields] = useState(false); 
   const [isScanning, setIsScanning] = useState(false);
@@ -62,6 +64,9 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
   const [newCatDesc, setNewCatDesc] = useState('');
   const [newCatPrice, setNewCatPrice] = useState<number>(0);
+
+  const [newCondTitle, setNewCondTitle] = useState('');
+  const [newCondDesc, setNewCondDesc] = useState('');
 
   const [showCrmModal, setShowCrmModal] = useState(false);
   const [crmTab, setCrmTab] = useState<'datos' | 'historial'>('datos');
@@ -119,6 +124,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       let bQ = supabase.from('budgets').select('*').order('created_at', { ascending: false });
       let cQ = supabase.from('clients').select('*').order('name', { ascending: true });
       let iQ = supabase.from('items_catalog').select('*').order('description', { ascending: true });
+      let condQ = supabase.from('conditions_catalog').select('*').order('title', { ascending: true });
       let oQ = supabase.from('work_orders').select('*').order('created_at', { ascending: false });
       let expQ = supabase.from('work_expenses').select('*');
       let attQ = supabase.from('attachments').select('*');
@@ -127,16 +133,18 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         bQ = bQ.eq('user_id', user.id);
         cQ = cQ.eq('user_id', user.id);
         iQ = iQ.eq('user_id', user.id);
+        condQ = condQ.eq('user_id', user.id);
         oQ = oQ.eq('user_id', user.id);
       }
 
-      const [resBudgets, resClients, resCatalog, resOrders, resExp, resAtt] = await Promise.all([bQ, cQ, iQ, oQ, expQ, attQ]);
+      const [resBudgets, resClients, resCatalog, resConds, resOrders, resExp, resAtt] = await Promise.all([bQ, cQ, iQ, condQ, oQ, expQ, attQ]);
       if (resClients.data) setCrmClients(resClients.data);
       if (resBudgets.data) {
         setBudgets(resBudgets.data);
         setBCode(generateNextBudgetCode(resBudgets.data));
       }
       if (resCatalog.data) setCatalogItems(resCatalog.data);
+      if (resConds.data) setCatalogConditions(resConds.data);
       if (resOrders.data) setWorkOrders(resOrders.data);
       if (resExp.data) setAllExpenses(resExp.data);
       if (resAtt.data) setAllAttachments(resAtt.data);
@@ -183,6 +191,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setBWorkOrderRef('');
     setBValidUntil('');
     setBItems([{ desc: '', qty: 1, price: 0 }]);
+    setBConditions([]);
     setShowAdvancedClientFields(false); 
   };
 
@@ -208,6 +217,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       setBBankAccount(foundClient?.bank_account || '');
       
       setBItems(budgetToEdit.items && budgetToEdit.items.length > 0 ? budgetToEdit.items : [{ desc: '', qty: 1, price: 0 }]);
+      setBConditions(budgetToEdit.conditions || []);
       setShowAdvancedClientFields(false); 
     } else {
       resetBudgetForm();
@@ -409,7 +419,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       // Generar el PDF dinámicamente
       const pdfBlob = await generatePdfBlob({
           code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
-          subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, items: bItems, 
+          subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, items: bItems, conditions: bConditions,
           status: editingBudgetId ? budgets.find(b=>b.id===editingBudgetId)?.status || 'pendiente' : 'pendiente', type: 'presupuesto', created_at: new Date().toISOString()
       }, companyData);
 
@@ -430,7 +440,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
 
       const budgetPayload = {
         code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
-        subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, pdf_name: `${bCode}.pdf`, items: bItems, 
+        subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, pdf_name: `${bCode}.pdf`, items: bItems, conditions: bConditions,
         user_id: user.id, status: editingBudgetId ? budgets.find(b=>b.id===editingBudgetId)?.status || 'pendiente' : 'pendiente', type: 'presupuesto',
         pdf_url: pdfUrl
       };
@@ -796,6 +806,25 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     } catch (err: any) {}
   };
 
+  const handleSaveCatalogCondition = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const { data } = await supabase.from('conditions_catalog').insert([{ title: newCondTitle, description: newCondDesc, user_id: user.id }]).select();
+      if (data) { 
+        setCatalogConditions(prev => [...prev, data[0]]); 
+        setNewCondTitle(''); 
+        setNewCondDesc(''); 
+      }
+    } catch (err: any) {}
+  };
+
+  const handleDeleteCatalogCondition = async (id: string) => {
+    try {
+      await supabase.from('conditions_catalog').delete().eq('id', id);
+      setCatalogConditions(prev => prev.filter(c => c.id !== id));
+    } catch (err: any) {}
+  };
+
   const getBase64ImageFromUrl = async (imageUrl: string) => {
     try {
       const res = await fetch(imageUrl);
@@ -813,7 +842,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   };
 
   const generatePdfBlob = async (docData: any, compData: any) => {
-      // BLINDAJE 2: Importamos las librerías dinámicamente SOLO cuando hacen falta
+      // BLINDAJE 2: Importamos las librerías dinámicamente SOLO cuando hacen falta en el navegador
       const { jsPDF } = (await import('jspdf'));
       const autoTable = (await import('jspdf-autotable')).default;
 
@@ -890,18 +919,49 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
       doc.setTextColor(0, 0, 0);
       doc.text(`TOTAL: ${Number(docData.total).toFixed(2)} €`, 130, finalY + 14);
 
+      let currentY = finalY + 24;
+
       if (compData && compData.bank_accounts && compData.bank_accounts.length > 0 && isFactura) {
           doc.setFontSize(10);
           doc.setTextColor(50, 50, 50);
-          doc.text('Cuentas Bancarias:', 14, finalY + 30);
-          let yAcc = finalY + 36;
+          doc.text('Cuentas Bancarias:', 14, currentY);
+          currentY += 6;
           compData.bank_accounts.forEach((acc: any) => {
-              doc.text(`${acc.bankName}: ${acc.iban}`, 14, yAcc);
-              yAcc += 6;
+              doc.text(`${acc.bankName}: ${acc.iban}`, 14, currentY);
+              currentY += 6;
           });
       }
       if (compData && compData.bizum_phone && isFactura) {
-          doc.text(`Bizum: ${compData.bizum_phone}`, 14, finalY + 46);
+          doc.text(`Bizum: ${compData.bizum_phone}`, 14, currentY);
+          currentY += 10;
+      }
+
+      // IMPRIMIR CONDICIONES AL FINAL DEL PDF
+      if (docData.conditions && docData.conditions.length > 0) {
+        currentY += 5;
+        doc.setFontSize(11);
+        doc.setTextColor(30, 41, 59);
+        doc.setFont(undefined, 'bold');
+        doc.text('Condiciones Generales y Observaciones:', 14, currentY);
+        doc.setFont(undefined, 'normal');
+        currentY += 6;
+        
+        docData.conditions.forEach((cond: any) => {
+           if (currentY > 270) {
+              doc.addPage();
+              currentY = 20;
+           }
+           doc.setFontSize(9);
+           doc.setTextColor(0, 0, 0);
+           doc.setFont(undefined, 'bold');
+           doc.text(`${cond.title}:`, 14, currentY);
+           
+           doc.setFont(undefined, 'normal');
+           doc.setTextColor(80, 80, 80);
+           const splitDesc = doc.splitTextToSize(cond.description, 180);
+           doc.text(splitDesc, 14, currentY + 4);
+           currentY += 4 + (splitDesc.length * 4) + 4; 
+        });
       }
 
       return doc.output('blob');
@@ -1022,6 +1082,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
             <>
               <button onClick={() => setShowStatsModal(true)} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold shadow-md hover:bg-slate-900 transition">📊 Estadísticas</button>
               <button onClick={() => setShowCatalogItemModal(true)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold border hover:bg-slate-200 transition">+ Partida</button>
+              <button onClick={() => setShowConditionCatalogModal(true)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold border hover:bg-slate-200 transition">+ Condiciones</button>
               <button onClick={() => handleOpenAddBudget(null)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold shadow-md hover:bg-indigo-700 transition">+ Presupuesto</button>
             </>
           )}
@@ -1330,6 +1391,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 </div>
               </div>
 
+              {/* PARTIDAS DEL PRESUPUESTO */}
               <div className="space-y-2 pt-3 border-t border-slate-200">
                 <div className="flex items-center justify-between mb-1">
                   <h4 className="font-bold text-slate-800">Partidas y Materiales</h4>
@@ -1351,6 +1413,36 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                   </div>
                 ))}
               </div>
+
+              {/* CONDICIONES DEL PRESUPUESTO */}
+              <div className="space-y-2 pt-3 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-1">
+                  <h4 className="font-bold text-slate-800">Condiciones de la Oferta</h4>
+                  <select
+                    onChange={(e) => {
+                      const selected = catalogConditions.find(c => c.id === e.target.value);
+                      if (selected) {
+                        setBConditions(prev => [...prev, { title: selected.title, description: selected.description }]);
+                      }
+                      e.target.value = ''; 
+                    }}
+                    className="px-2 py-1 text-[10px] border border-indigo-200 rounded text-indigo-700 bg-indigo-50 font-bold outline-none cursor-pointer"
+                  >
+                    <option value="">+ Añadir Condición del catálogo...</option>
+                    {catalogConditions.map(c => (
+                      <option key={c.id} value={c.id}>{c.title}</option>
+                    ))}
+                  </select>
+                </div>
+                {bConditions.map((cond, index) => (
+                  <div key={index} className="flex flex-col relative bg-slate-50 p-2 rounded-lg border border-slate-200 gap-1 pr-8">
+                    <input type="text" value={cond.title} onChange={e => { const u = [...bConditions]; u[index].title = e.target.value; setBConditions(u); }} className="w-full p-1.5 border border-slate-300 rounded focus:border-indigo-500 outline-none font-bold text-slate-700" placeholder="Concepto (Ej. Forma de pago)" />
+                    <textarea value={cond.description} onChange={e => { const u = [...bConditions]; u[index].description = e.target.value; setBConditions(u); }} className="w-full p-1.5 border border-slate-300 rounded focus:border-indigo-500 outline-none text-slate-600 resize-none" rows={2} placeholder="Descripción de la condición..." />
+                    <button type="button" onClick={() => { const u = [...bConditions]; u.splice(index, 1); setBConditions(u); }} className="absolute right-2 top-2 w-6 h-6 flex items-center justify-center bg-rose-100 text-rose-600 rounded hover:bg-rose-200 font-bold transition">✕</button>
+                  </div>
+                ))}
+              </div>
+
               <div className="bg-slate-800 text-white p-3 rounded-lg flex items-center justify-between mt-2 shadow-md">
                 <span className="font-bold uppercase tracking-wider text-slate-300">Total IVA Inc.</span><span className="font-black text-lg">{calculatedTotal.toFixed(2)} €</span>
               </div>
@@ -1635,163 +1727,47 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         </div>
       )}
 
-      {/* MODAL CRM ALTA/EDICIÓN */}
-      {showCrmModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 p-2 sm:p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-4xl p-0 shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
-            <div className="bg-slate-900 p-4 sm:p-5 flex justify-between items-center shrink-0">
-              <h3 className="font-black text-white text-lg flex items-center gap-2">👤 {crmForm.id ? `Ficha: ${crmForm.name}` : 'Alta de Nuevo Cliente'}</h3>
-              <button onClick={() => setShowCrmModal(false)} className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center font-bold">✕</button>
+      {/* MODAL CREAR CONDICIÓN DE CATÁLOGO (NUEVO) */}
+      {showConditionCatalogModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4 animate-in zoom-in-95 my-auto">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+              <h3 className="font-black text-base text-slate-800">📝 Catálogo de Condiciones</h3>
+              <button onClick={() => setShowConditionCatalogModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
             </div>
-            {crmForm.id && (
-              <div className="flex bg-slate-800 px-4 pt-2 border-b border-slate-700 shrink-0 overflow-x-auto no-scrollbar">
-                <button onClick={() => setCrmTab('datos')} className={`pb-3 px-2 text-xs font-bold uppercase tracking-wider transition whitespace-nowrap ${crmTab === 'datos' ? 'border-b-2 border-indigo-400 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Datos Generales</button>
-                <button onClick={() => setCrmTab('historial')} className={`pb-3 px-2 text-xs font-bold uppercase tracking-wider transition whitespace-nowrap ${crmTab === 'historial' ? 'border-b-2 border-indigo-400 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Trazabilidad & Proyectos</button>
+            
+            {/* Formulario para añadir nueva */}
+            <form onSubmit={handleSaveCatalogCondition} className="space-y-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <h4 className="font-bold text-indigo-700">Añadir Nueva Condición al Catálogo</h4>
+              <div>
+                <label className="block font-bold text-slate-600 mb-1">Concepto (Ej. Forma de pago)</label>
+                <input type="text" required value={newCondTitle} onChange={e => setNewCondTitle(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 font-bold focus:border-indigo-500 focus:outline-none transition" />
               </div>
-            )}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50">
-              {crmTab === 'datos' && (
-                <form id="crmFormId" onSubmit={handleSaveCrmClient} className="space-y-6">
-                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                    <h4 className="font-black text-indigo-700 text-xs uppercase tracking-widest border-b border-slate-100 pb-2">1. Datos Personales y Localización</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-                      <div className="sm:col-span-2 lg:col-span-2"><label className="block font-bold text-slate-600 mb-1">Nombre Completo *</label><input required type="text" value={crmForm.name} onChange={e => setCrmForm({...crmForm, name: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-bold focus:border-indigo-500 focus:outline-none bg-slate-50" /></div>
-                      <div><label className="block font-bold text-slate-600 mb-1">DNI / NIE</label><input type="text" value={crmForm.cif} onChange={e => setCrmForm({...crmForm, cif: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
-                      <div><label className="block font-bold text-slate-600 mb-1">Teléfono Personal</label><input type="tel" value={crmForm.phone} onChange={e => setCrmForm({...crmForm, phone: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
-                      <div className="sm:col-span-2 lg:col-span-4"><label className="block font-bold text-slate-600 mb-1">Correo Electrónico</label><input type="email" value={crmForm.email} onChange={e => setCrmForm({...crmForm, email: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
-                      <div className="sm:col-span-2 lg:col-span-3"><label className="block font-bold text-slate-600 mb-1">Calle / Avenida / Plaza</label><input type="text" value={crmForm.street} onChange={e => setCrmForm({...crmForm, street: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
-                      <div><label className="block font-bold text-slate-600 mb-1">Número / Piso</label><input type="text" value={crmForm.street_number} onChange={e => setCrmForm({...crmForm, street_number: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
-                      <div><label className="block font-bold text-slate-600 mb-1">Código Postal</label><input type="text" value={crmForm.postal_code} onChange={e => setCrmForm({...crmForm, postal_code: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
-                      <div className="sm:col-span-2 lg:col-span-1"><label className="block font-bold text-slate-600 mb-1">Población / Localidad</label><input type="text" value={crmForm.population} onChange={e => setCrmForm({...crmForm, population: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
-                      <div className="sm:col-span-2 lg:col-span-1"><label className="block font-bold text-slate-600 mb-1">Ciudad / Provincia</label><input type="text" value={crmForm.city} onChange={e => setCrmForm({...crmForm, city: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
-                      <div className="sm:col-span-2 lg:col-span-1"><label className="block font-bold text-slate-600 mb-1">País</label><input type="text" value={crmForm.country} onChange={e => setCrmForm({...crmForm, country: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+              <div>
+                <label className="block font-bold text-slate-600 mb-1">Descripción detallada</label>
+                <textarea required rows={3} value={newCondDesc} onChange={e => setNewCondDesc(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none transition resize-none" placeholder="Ej. 50% a la aceptación y 50% a la finalización..." />
+              </div>
+              <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg font-bold shadow-md">Guardar en el catálogo</button>
+            </form>
+
+            {/* Listado de guardadas */}
+            <div className="space-y-2 mt-4 max-h-48 overflow-y-auto">
+              {catalogConditions.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-2 font-medium">Aún no has guardado ninguna condición.</p>
+              ) : (
+                catalogConditions.map(c => (
+                  <div key={c.id} className="bg-white border border-slate-200 p-3 rounded-lg flex justify-between items-start gap-2 shadow-sm">
+                    <div className="flex-1">
+                      <p className="font-bold text-sm text-slate-800 leading-tight">{c.title}</p>
+                      <p className="text-xs text-slate-500 mt-1 line-clamp-2">{c.description}</p>
                     </div>
+                    <button onClick={() => handleDeleteCatalogCondition(c.id)} className="text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 p-1.5 rounded transition">
+                      🗑
+                    </button>
                   </div>
-                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-                    <h4 className="font-black text-slate-700 text-xs uppercase tracking-widest border-b border-slate-100 pb-2">2. Datos de Facturación / Empresa</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-                      <div className="sm:col-span-2"><label className="block font-bold text-slate-600 mb-1">Nombre de la Empresa</label><input type="text" value={crmForm.company} onChange={e => setCrmForm({...crmForm, company: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
-                      <div><label className="block font-bold text-slate-600 mb-1">NIF Empresa</label><input type="text" value={crmForm.company_cif} onChange={e => setCrmForm({...crmForm, company_cif: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
-                      <div className="sm:col-span-2 lg:col-span-3"><label className="block font-bold text-slate-600 mb-1">Dirección de la Empresa</label><input type="text" value={crmForm.company_address} onChange={e => setCrmForm({...crmForm, company_address: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
-                      <div><label className="block font-bold text-slate-600 mb-1">Teléfono Empresa</label><input type="tel" value={crmForm.company_phone} onChange={e => setCrmForm({...crmForm, company_phone: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
-                      <div><label className="block font-bold text-slate-600 mb-1">Contacto Administración</label><input type="text" placeholder="Ej. Marta" value={crmForm.admin_contact} onChange={e => setCrmForm({...crmForm, admin_contact: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
-                      <div><label className="block font-bold text-slate-600 mb-1">Correo Administración</label><input type="email" value={crmForm.admin_email} onChange={e => setCrmForm({...crmForm, admin_email: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
-                      <div className="sm:col-span-3"><label className="block font-bold text-slate-600 mb-1">Cuenta Bancaria (IBAN)</label><input type="text" placeholder="ESXX XXXX XXXX..." value={crmForm.bank_account} onChange={e => setCrmForm({...crmForm, bank_account: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
-                    </div>
-                  </div>
-                </form>
-              )}
-              {crmTab === 'historial' && (
-                <div className="space-y-5">
-                  <div className="grid grid-cols-3 gap-2 bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
-                    <div>
-                      <span className="text-[9px] uppercase font-bold text-slate-400 block">Total Presup.</span>
-                      <span className="font-black text-sm text-slate-800">{budgets.filter(b => b.type === 'presupuesto' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).reduce((acc, b) => acc + Number(b.total), 0).toFixed(2)} €</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] uppercase font-bold text-indigo-500 block">Total Facturado</span>
-                      <span className="font-black text-sm text-indigo-700">{budgets.filter(b => b.type === 'factura' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).reduce((acc, b) => acc + Number(b.total), 0).toFixed(2)} €</span>
-                    </div>
-                    <div>
-                      <span className="text-[9px] uppercase font-bold text-rose-500 block">Pendiente Pago</span>
-                      <span className="font-black text-sm text-rose-600">{budgets.filter(b => b.type === 'factura' && b.status !== 'cobrada' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).reduce((acc, b) => acc + Number(b.total), 0).toFixed(2)} €</span>
-                    </div>
-                  </div>
-
-                  {budgets.filter(b => b.type === 'presupuesto' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).length === 0 ? (
-                    <div className="text-center py-10 text-slate-500 font-bold bg-white rounded-xl border border-dashed border-slate-300">
-                      No hay proyectos ni presupuestos registrados para este cliente.
-                    </div>
-                  ) : (
-                    budgets.filter(b => b.type === 'presupuesto' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).map(proj => {
-                      const relatedInvoices = budgets.filter(f => f.type === 'factura' && f.parent_id === proj.id);
-                      const relatedOrder = workOrders.find(wo => wo.budget_id === proj.id);
-                      const relatedExpenses = relatedOrder ? allExpenses.filter(e => e.work_order_id === relatedOrder.id) : [];
-                      const relatedFiles = relatedOrder ? allAttachments.filter(a => a.work_order_id === relatedOrder.id) : [];
-
-                      return (
-                        <div key={proj.id} className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-sm">
-                          <div className="flex justify-between items-start border-b border-slate-100 pb-2">
-                            <div>
-                              <span className="text-[9px] font-bold uppercase bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">Proyecto</span>
-                              <h4 className="font-black text-slate-800 text-sm mt-1">{proj.code}</h4>
-                              {proj.work_order_ref && (
-                                <p className="text-xs font-bold text-indigo-600">Ref: {proj.work_order_ref}</p>
-                              )}
-                              <span className="text-[10px] text-slate-400 font-mono">{proj.created_at?.split('T')[0]}</span>
-                            </div>
-                            <div className="text-right">
-                              <span className="font-black text-slate-800 text-sm">{Number(proj.total).toFixed(2)} €</span>
-                              <div className="text-[10px] font-bold uppercase text-indigo-600">{proj.status}</div>
-                            </div>
-                          </div>
-
-                          <div className="flex gap-2">
-                            {proj.pdf_url ? (
-                                <a href={proj.pdf_url} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1 bg-sky-50 border border-sky-200 text-sky-700 text-[10px] font-bold rounded hover:bg-sky-100">👁️ Ver PDF</a>
-                            ) : (
-                                <button onClick={() => handleGeneratePdfAction(proj, 'download')} className="px-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded hover:bg-slate-100">⬇ Ver PDF</button>
-                            )}
-                            <button onClick={() => handleDeleteDocument(proj)} className="px-2.5 py-1 bg-rose-50 border border-rose-200 text-rose-600 text-[10px] font-bold rounded hover:bg-rose-100">🗑 Eliminar Proyecto</button>
-                          </div>
-
-                          {relatedOrder && (
-                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
-                              <div className="flex justify-between items-center text-xs">
-                                <span className="font-black text-slate-700">🏗️ Obra: {relatedOrder.work_order_ref || relatedOrder.status}</span>
-                                <span className="text-[10px] font-bold text-rose-600">Gastos: -{relatedExpenses.reduce((acc, e) => acc + Number(e.amount), 0).toFixed(2)} €</span>
-                              </div>
-
-                              {relatedFiles.length > 0 && (
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                                  {relatedFiles.map(file => (
-                                    <div key={file.id} className="bg-white p-2 rounded border border-slate-200 text-[10px] flex flex-col justify-between group">
-                                      <a href={file.file_url} target="_blank" rel="noopener noreferrer" className="font-bold text-indigo-600 truncate hover:underline block mb-1">
-                                        📄 {file.file_name}
-                                      </a>
-                                      <button onClick={() => handleDeleteAttachment(file.id)} className="text-rose-500 hover:text-rose-700 font-bold text-[9px] text-right mt-1">🗑 Eliminar</button>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {relatedInvoices.length > 0 && (
-                            <div className="space-y-1.5 pt-1">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Facturas Generadas</span>
-                              {relatedInvoices.map(inv => (
-                                <div key={inv.id} className="flex justify-between items-center bg-indigo-50/50 p-2.5 rounded-lg border border-indigo-100 text-xs">
-                                  <div>
-                                    <span className="font-black text-indigo-900">{inv.code}</span>
-                                    <span className="text-[10px] text-slate-500 ml-2">({inv.status === 'cobrada' ? 'Cobrada' : 'Pendiente'})</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-black text-slate-800">{Number(inv.total).toFixed(2)} €</span>
-                                    {inv.pdf_url ? (
-                                        <a href={inv.pdf_url} target="_blank" rel="noopener noreferrer" className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 text-[9px] font-bold rounded">👁️ PDF</a>
-                                    ) : (
-                                        <button onClick={() => handleGeneratePdfAction(inv, 'download')} className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 text-[9px] font-bold rounded">⬇ PDF</button>
-                                    )}
-                                    <button onClick={() => handleDeleteDocument(inv)} className="text-rose-500 hover:text-rose-700 font-bold text-xs">✕</button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                ))
               )}
             </div>
-            {crmTab === 'datos' && (
-              <div className="p-4 bg-white border-t border-slate-200 flex gap-3 shrink-0">
-                <button type="button" onClick={() => setShowCrmModal(false)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg font-bold text-sm">Cancelar</button>
-                <button type="submit" form="crmFormId" className="flex-[2] py-3 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg font-black text-sm shadow-md">Guardar Ficha</button>
-              </div>
-            )}
           </div>
         </div>
       )}
