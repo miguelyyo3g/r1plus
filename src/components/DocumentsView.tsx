@@ -62,6 +62,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
 
+  const [newCatRef, setNewCatRef] = useState('');
   const [newCatDesc, setNewCatDesc] = useState('');
   const [newCatPrice, setNewCatPrice] = useState<number>(0);
 
@@ -364,7 +365,42 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     setShowSuggestions(false);
   };
 
-  const getFilteredCatalog = (desc: string) => desc.trim() ? catalogItems.filter(c => c.description && String(c.description).toLowerCase().includes(desc.toLowerCase())) : [];
+  // BUSCADOR INTELIGENTE DE PARTIDAS (CATÁLOGO + HISTORIAL)
+  const getFilteredItemsSuggestions = (desc: string) => {
+    if (!desc.trim()) return [];
+    const query = desc.toLowerCase();
+    
+    // 1. Coincidencias en el catálogo oficial
+    const catalogMatches = catalogItems
+      .filter(c => c.description && String(c.description).toLowerCase().includes(query))
+      .map(c => ({ desc: c.reference ? `[${c.reference}] ${c.description}` : c.description, price: c.price, source: 'Catálogo' }));
+    
+    // 2. Coincidencias en el historial de presupuestos pasados
+    const historyItems: any[] = [];
+    budgets.forEach(b => {
+      if (b.items && Array.isArray(b.items)) {
+        b.items.forEach((i: any) => {
+          if (i.desc && String(i.desc).toLowerCase().includes(query)) {
+            historyItems.push({ desc: i.desc, price: i.price, source: 'Historial' });
+          }
+        });
+      }
+    });
+
+    // Combinar y eliminar duplicados por descripción
+    const combined = [...catalogMatches, ...historyItems];
+    const unique = [];
+    const seen = new Set();
+    for (const item of combined) {
+      const lowerDesc = item.desc.toLowerCase().trim();
+      if (!seen.has(lowerDesc)) {
+        seen.add(lowerDesc);
+        unique.push(item);
+      }
+    }
+    return unique.slice(0, 15);
+  };
+
   const handleAddItemRow = () => setBItems(prev => [...prev, { desc: '', qty: 1, price: 0 }]);
   const calculatedSubtotal = bItems.reduce((acc, item) => acc + (Number(item.qty) || 0) * (Number(item.price) || 0), 0);
   const calculatedTotal = calculatedSubtotal * 1.21;
@@ -416,7 +452,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         }
       }
 
-      // Generar el PDF dinámicamente
       const pdfBlob = await generatePdfBlob({
           code: bCode, work_order_ref: bWorkOrderRef, client: bClient, client_cif: bCif, address: bAddress, valid_until: bValidUntil,
           subtotal: calculatedSubtotal, vat: calculatedSubtotal * 0.21, total: calculatedTotal, items: bItems, conditions: bConditions,
@@ -798,14 +833,69 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
     } catch (err: any) { alert('Error guardando cliente: ' + err.message); }
   };
 
+  // GESTIÓN DEL CATÁLOGO DE PARTIDAS (AÑADIR, BORRAR E IMPORTAR CSV)
   const handleSaveCatalogItem = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { data } = await supabase.from('items_catalog').insert([{ description: newCatDesc, price: newCatPrice, user_id: user.id }]).select();
-      if (data) { setCatalogItems(prev => [...prev, data[0]]); setShowCatalogItemModal(false); setNewCatDesc(''); setNewCatPrice(0); }
+      const payload = { reference: newCatRef || null, description: newCatDesc, price: newCatPrice, user_id: user.id };
+      const { data } = await supabase.from('items_catalog').insert([payload]).select();
+      if (data) { 
+        setCatalogItems(prev => [...prev, data[0]]); 
+        setNewCatRef('');
+        setNewCatDesc(''); 
+        setNewCatPrice(0); 
+      }
+    } catch (err: any) { alert("Error guardando partida"); }
+  };
+
+  const handleDeleteCatalogItem = async (id: string) => {
+    if (!confirm('¿Seguro que quieres borrar esta partida del catálogo?')) return;
+    try {
+      await supabase.from('items_catalog').delete().eq('id', id);
+      setCatalogItems(prev => prev.filter(c => c.id !== id));
     } catch (err: any) {}
   };
 
+  const handleFileUploadCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      const newItems = [];
+      
+      for (let i = 1; i < lines.length; i++) {
+        // Soporta separación por Punto y Coma o Tabulador (típico de Excel)
+        const parts = lines[i].split(/[;\t]/);
+        if (parts.length >= 2) {
+          const ref = parts.length >= 3 ? parts[0].trim() : null;
+          const desc = parts.length >= 3 ? parts[1].trim() : parts[0].trim();
+          let priceStr = parts.length >= 3 ? parts[2] : parts[1];
+          // Limpiar el precio para pasarlo a float
+          const price = parseFloat(priceStr.replace(/[^0-9,-]+/g, '').replace(',', '.'));
+          
+          if (desc && !isNaN(price)) {
+            newItems.push({ reference: ref, description: desc, price: price, user_id: user.id });
+          }
+        }
+      }
+
+      if (newItems.length > 0) {
+        const { data } = await supabase.from('items_catalog').insert(newItems).select();
+        if (data) {
+          setCatalogItems(prev => [...data, ...prev]);
+          alert(`¡Se han importado ${data.length} partidas al catálogo con éxito!`);
+        }
+      } else {
+        alert('No se encontró ninguna partida válida en el archivo. Verifica el formato.');
+      }
+    } catch (err) {
+      alert('Error leyendo el archivo. Formato esperado: Referencia ; Concepto ; Importe');
+    }
+    e.target.value = '';
+  };
+
+  // GESTIÓN CATÁLOGO DE CONDICIONES
   const handleSaveCatalogCondition = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -842,7 +932,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
   };
 
   const generatePdfBlob = async (docData: any, compData: any) => {
-      // BLINDAJE 2: Importamos las librerías dinámicamente SOLO cuando hacen falta en el navegador
       const { jsPDF } = (await import('jspdf'));
       const autoTable = (await import('jspdf-autotable')).default;
 
@@ -908,7 +997,8 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         head: [['Descripción', 'Cantidad', 'Precio Unit.', 'Total']],
         body: tableData,
         theme: 'striped',
-        headStyles: { fillColor: [79, 70, 229] }
+        headStyles: { fillColor: [79, 70, 229] },
+        styles: { cellPadding: 3, fontSize: 9 }
       });
 
       const finalY = (doc as any).lastAutoTable.finalY + 10;
@@ -1081,7 +1171,7 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
           ) : (
             <>
               <button onClick={() => setShowStatsModal(true)} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold shadow-md hover:bg-slate-900 transition">📊 Estadísticas</button>
-              <button onClick={() => setShowCatalogItemModal(true)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold border hover:bg-slate-200 transition">+ Partida</button>
+              <button onClick={() => setShowCatalogItemModal(true)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold border hover:bg-slate-200 transition">📦 Partidas</button>
               <button onClick={() => setShowConditionCatalogModal(true)} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold border hover:bg-slate-200 transition">+ Condiciones</button>
               <button onClick={() => handleOpenAddBudget(null)} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold shadow-md hover:bg-indigo-700 transition">+ Presupuesto</button>
             </>
@@ -1399,10 +1489,26 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 </div>
                 {bItems.map((item, index) => (
                   <div key={index} className="flex flex-col sm:flex-row gap-2 relative bg-slate-50 p-2 rounded-lg border border-slate-200">
-                    <input type="text" value={item.desc} onChange={e => { const u = [...bItems]; u[index].desc = e.target.value; setBItems(u); }} onFocus={() => setActiveItemIndex(index)} onBlur={() => setTimeout(() => setActiveItemIndex(null), 200)} className="flex-1 p-2 border border-slate-300 rounded-md focus:border-indigo-500 focus:outline-none transition" placeholder="Descripción..." />
-                    {activeItemIndex === index && getFilteredCatalog(item.desc).length > 0 && (
-                      <div className="absolute top-10 z-50 w-full bg-white border border-slate-200 shadow-xl max-h-40 overflow-y-auto rounded-lg">
-                        {getFilteredCatalog(item.desc).map(cat => <div key={cat.id} onMouseDown={() => { const u = [...bItems]; u[index].desc = cat.description; u[index].price = cat.price; setBItems(u); setActiveItemIndex(null); }} className="p-3 hover:bg-indigo-50 cursor-pointer font-medium border-b border-slate-100 transition">{cat.description} <span className="font-black text-indigo-600 ml-2">({cat.price}€)</span></div>)}
+                    <textarea 
+                      value={item.desc} 
+                      onChange={e => { const u = [...bItems]; u[index].desc = e.target.value; setBItems(u); }} 
+                      onFocus={() => setActiveItemIndex(index)} 
+                      onBlur={() => setTimeout(() => setActiveItemIndex(null), 200)} 
+                      className="flex-1 p-2.5 border border-slate-300 rounded-md focus:border-indigo-500 focus:outline-none transition resize-y min-h-[44px] text-xs font-medium" 
+                      placeholder="Busca en el catálogo, en tu historial, o escribe los detalles de la partida..."
+                      rows={item.desc.length > 50 || item.desc.includes('\n') ? 3 : 1}
+                    />
+                    {activeItemIndex === index && getFilteredItemsSuggestions(item.desc).length > 0 && (
+                      <div className="absolute top-[48px] z-50 w-full bg-white border border-slate-200 shadow-xl max-h-48 overflow-y-auto rounded-lg">
+                        {getFilteredItemsSuggestions(item.desc).map((sugg, i) => (
+                          <div key={i} onMouseDown={() => { const u = [...bItems]; u[index].desc = sugg.desc; u[index].price = sugg.price; setBItems(u); setActiveItemIndex(null); }} className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 transition">
+                            <div className="flex justify-between items-start">
+                              <span className="font-bold text-slate-800 text-xs">{sugg.desc}</span>
+                              <span className="font-black text-indigo-600 ml-3 whitespace-nowrap">{sugg.price} €</span>
+                            </div>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded mt-1.5 inline-block uppercase tracking-widest ${sugg.source === 'Catálogo' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-600'}`}>{sugg.source}</span>
+                          </div>
+                        ))}
                       </div>
                     )}
                     <div className="flex gap-2">
@@ -1680,10 +1786,25 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
                 </div>
                 {restInvoiceModal.items.map((item, index) => (
                   <div key={index} className="flex flex-col sm:flex-row gap-2 relative bg-slate-50 p-2 rounded-lg border border-slate-200">
-                    <input type="text" value={item.desc} onChange={e => { const u = [...restInvoiceModal.items]; u[index].desc = e.target.value; setRestInvoiceModal(p => ({...p, items: u})); }} onFocus={() => setRestInvoiceModal(p => ({...p, activeItemIndex: index}))} onBlur={() => setTimeout(() => setRestInvoiceModal(p => ({...p, activeItemIndex: null})), 200)} className="flex-1 p-2 border border-slate-300 rounded-md focus:border-indigo-500 focus:outline-none transition" placeholder="Descripción..." />
-                    {restInvoiceModal.activeItemIndex === index && getFilteredCatalog(item.desc).length > 0 && (
-                      <div className="absolute top-10 z-50 w-full bg-white border border-slate-200 shadow-xl max-h-40 overflow-y-auto rounded-lg">
-                        {getFilteredCatalog(item.desc).map(cat => <div key={cat.id} onClick={() => { const u = [...restInvoiceModal.items]; u[index].desc = cat.description; u[index].price = cat.price; setRestInvoiceModal(p => ({...p, items: u, activeItemIndex: null})); }} className="p-3 hover:bg-indigo-50 cursor-pointer font-medium border-b border-slate-100 transition">{cat.description} <span className="font-black text-indigo-600 ml-2">({cat.price}€)</span></div>)}
+                    <textarea 
+                      value={item.desc} 
+                      onChange={e => { const u = [...restInvoiceModal.items]; u[index].desc = e.target.value; setRestInvoiceModal(p => ({...p, items: u})); }} 
+                      onFocus={() => setRestInvoiceModal(p => ({...p, activeItemIndex: index}))} 
+                      onBlur={() => setTimeout(() => setRestInvoiceModal(p => ({...p, activeItemIndex: null})), 200)} 
+                      className="flex-1 p-2.5 border border-slate-300 rounded-md focus:border-indigo-500 focus:outline-none transition resize-y min-h-[44px] text-xs font-medium" 
+                      placeholder="Descripción de la partida..."
+                      rows={item.desc.length > 50 || item.desc.includes('\n') ? 3 : 1}
+                    />
+                    {restInvoiceModal.activeItemIndex === index && getFilteredItemsSuggestions(item.desc).length > 0 && (
+                      <div className="absolute top-[48px] z-50 w-full bg-white border border-slate-200 shadow-xl max-h-40 overflow-y-auto rounded-lg">
+                        {getFilteredItemsSuggestions(item.desc).map((sugg, i) => (
+                          <div key={i} onMouseDown={() => { const u = [...restInvoiceModal.items]; u[index].desc = sugg.desc; u[index].price = sugg.price; setRestInvoiceModal(p => ({...p, items: u, activeItemIndex: null})); }} className="p-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-100 transition">
+                            <div className="flex justify-between items-start">
+                              <span className="font-bold text-slate-800 text-xs">{sugg.desc}</span>
+                              <span className="font-black text-indigo-600 ml-3 whitespace-nowrap">{sugg.price} €</span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                     <div className="flex gap-2">
@@ -1727,6 +1848,167 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         </div>
       )}
 
+      {/* MODAL CRM ALTA/EDICIÓN */}
+      {showCrmModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 p-2 sm:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-4xl p-0 shadow-2xl flex flex-col max-h-[95vh] overflow-hidden animate-in zoom-in-95">
+            <div className="bg-slate-900 p-4 sm:p-5 flex justify-between items-center shrink-0">
+              <h3 className="font-black text-white text-lg flex items-center gap-2">👤 {crmForm.id ? `Ficha: ${crmForm.name}` : 'Alta de Nuevo Cliente'}</h3>
+              <button onClick={() => setShowCrmModal(false)} className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center font-bold">✕</button>
+            </div>
+            {crmForm.id && (
+              <div className="flex bg-slate-800 px-4 pt-2 border-b border-slate-700 shrink-0 overflow-x-auto no-scrollbar">
+                <button onClick={() => setCrmTab('datos')} className={`pb-3 px-2 text-xs font-bold uppercase tracking-wider transition whitespace-nowrap ${crmTab === 'datos' ? 'border-b-2 border-indigo-400 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Datos Generales</button>
+                <button onClick={() => setCrmTab('historial')} className={`pb-3 px-2 text-xs font-bold uppercase tracking-wider transition whitespace-nowrap ${crmTab === 'historial' ? 'border-b-2 border-indigo-400 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Trazabilidad & Proyectos</button>
+              </div>
+            )}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50">
+              {crmTab === 'datos' && (
+                <form id="crmFormId" onSubmit={handleSaveCrmClient} className="space-y-6">
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <h4 className="font-black text-indigo-700 text-xs uppercase tracking-widest border-b border-slate-100 pb-2">1. Datos Personales y Localización</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                      <div className="sm:col-span-2 lg:col-span-2"><label className="block font-bold text-slate-600 mb-1">Nombre Completo *</label><input required type="text" value={crmForm.name} onChange={e => setCrmForm({...crmForm, name: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-bold focus:border-indigo-500 focus:outline-none bg-slate-50" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">DNI / NIE</label><input type="text" value={crmForm.cif} onChange={e => setCrmForm({...crmForm, cif: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Teléfono Personal</label><input type="tel" value={crmForm.phone} onChange={e => setCrmForm({...crmForm, phone: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-4"><label className="block font-bold text-slate-600 mb-1">Correo Electrónico</label><input type="email" value={crmForm.email} onChange={e => setCrmForm({...crmForm, email: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-3"><label className="block font-bold text-slate-600 mb-1">Calle / Avenida / Plaza</label><input type="text" value={crmForm.street} onChange={e => setCrmForm({...crmForm, street: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Número / Piso</label><input type="text" value={crmForm.street_number} onChange={e => setCrmForm({...crmForm, street_number: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Código Postal</label><input type="text" value={crmForm.postal_code} onChange={e => setCrmForm({...crmForm, postal_code: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-1"><label className="block font-bold text-slate-600 mb-1">Población / Localidad</label><input type="text" value={crmForm.population} onChange={e => setCrmForm({...crmForm, population: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-1"><label className="block font-bold text-slate-600 mb-1">Ciudad / Provincia</label><input type="text" value={crmForm.city} onChange={e => setCrmForm({...crmForm, city: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-1"><label className="block font-bold text-slate-600 mb-1">País</label><input type="text" value={crmForm.country} onChange={e => setCrmForm({...crmForm, country: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                    </div>
+                  </div>
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
+                    <h4 className="font-black text-slate-700 text-xs uppercase tracking-widest border-b border-slate-100 pb-2">2. Datos de Facturación / Empresa</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                      <div className="sm:col-span-2"><label className="block font-bold text-slate-600 mb-1">Nombre de la Empresa</label><input type="text" value={crmForm.company} onChange={e => setCrmForm({...crmForm, company: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">NIF Empresa</label><input type="text" value={crmForm.company_cif} onChange={e => setCrmForm({...crmForm, company_cif: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-2 lg:col-span-3"><label className="block font-bold text-slate-600 mb-1">Dirección de la Empresa</label><input type="text" value={crmForm.company_address} onChange={e => setCrmForm({...crmForm, company_address: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Teléfono Empresa</label><input type="tel" value={crmForm.company_phone} onChange={e => setCrmForm({...crmForm, company_phone: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Contacto Administración</label><input type="text" placeholder="Ej. Marta" value={crmForm.admin_contact} onChange={e => setCrmForm({...crmForm, admin_contact: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div><label className="block font-bold text-slate-600 mb-1">Correo Administración</label><input type="email" value={crmForm.admin_email} onChange={e => setCrmForm({...crmForm, admin_email: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none" /></div>
+                      <div className="sm:col-span-3"><label className="block font-bold text-slate-600 mb-1">Cuenta Bancaria (IBAN)</label><input type="text" placeholder="ESXX XXXX XXXX..." value={crmForm.bank_account} onChange={e => setCrmForm({...crmForm, bank_account: e.target.value})} className="w-full p-2.5 rounded-lg border border-slate-300 font-mono focus:border-indigo-500 focus:outline-none" /></div>
+                    </div>
+                  </div>
+                </form>
+              )}
+              {crmTab === 'historial' && (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-3 gap-2 bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
+                    <div>
+                      <span className="text-[9px] uppercase font-bold text-slate-400 block">Total Presup.</span>
+                      <span className="font-black text-sm text-slate-800">{budgets.filter(b => b.type === 'presupuesto' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).reduce((acc, b) => acc + Number(b.total), 0).toFixed(2)} €</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] uppercase font-bold text-indigo-500 block">Total Facturado</span>
+                      <span className="font-black text-sm text-indigo-700">{budgets.filter(b => b.type === 'factura' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).reduce((acc, b) => acc + Number(b.total), 0).toFixed(2)} €</span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] uppercase font-bold text-rose-500 block">Pendiente Pago</span>
+                      <span className="font-black text-sm text-rose-600">{budgets.filter(b => b.type === 'factura' && b.status !== 'cobrada' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).reduce((acc, b) => acc + Number(b.total), 0).toFixed(2)} €</span>
+                    </div>
+                  </div>
+
+                  {budgets.filter(b => b.type === 'presupuesto' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).length === 0 ? (
+                    <div className="text-center py-10 text-slate-500 font-bold bg-white rounded-xl border border-dashed border-slate-300">
+                      No hay proyectos ni presupuestos registrados para este cliente.
+                    </div>
+                  ) : (
+                    budgets.filter(b => b.type === 'presupuesto' && (b.client === crmForm.name || (b.client_cif && b.client_cif === crmForm.cif))).map(proj => {
+                      const relatedInvoices = budgets.filter(f => f.type === 'factura' && f.parent_id === proj.id);
+                      const relatedOrder = workOrders.find(wo => wo.budget_id === proj.id);
+                      const relatedExpenses = relatedOrder ? allExpenses.filter(e => e.work_order_id === relatedOrder.id) : [];
+                      const relatedFiles = relatedOrder ? allAttachments.filter(a => a.work_order_id === relatedOrder.id) : [];
+
+                      return (
+                        <div key={proj.id} className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-sm">
+                          <div className="flex justify-between items-start border-b border-slate-100 pb-2">
+                            <div>
+                              <span className="text-[9px] font-bold uppercase bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">Proyecto</span>
+                              <h4 className="font-black text-slate-800 text-sm mt-1">{proj.code}</h4>
+                              {proj.work_order_ref && (
+                                <p className="text-xs font-bold text-indigo-600">Ref: {proj.work_order_ref}</p>
+                              )}
+                              <span className="text-[10px] text-slate-400 font-mono">{proj.created_at?.split('T')[0]}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="font-black text-slate-800 text-sm">{Number(proj.total).toFixed(2)} €</span>
+                              <div className="text-[10px] font-bold uppercase text-indigo-600">{proj.status}</div>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2">
+                            {proj.pdf_url ? (
+                                <a href={proj.pdf_url} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1 bg-sky-50 border border-sky-200 text-sky-700 text-[10px] font-bold rounded hover:bg-sky-100">👁️ Ver PDF</a>
+                            ) : (
+                                <button onClick={() => handleGeneratePdfAction(proj, 'download')} className="px-2.5 py-1 bg-slate-50 border border-slate-200 text-slate-700 text-[10px] font-bold rounded hover:bg-slate-100">⬇ Ver PDF</button>
+                            )}
+                            <button onClick={() => handleDeleteDocument(proj)} className="px-2.5 py-1 bg-rose-50 border border-rose-200 text-rose-600 text-[10px] font-bold rounded hover:bg-rose-100">🗑 Eliminar Proyecto</button>
+                          </div>
+
+                          {relatedOrder && (
+                            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-black text-slate-700">🏗️ Obra: {relatedOrder.work_order_ref || relatedOrder.status}</span>
+                                <span className="text-[10px] font-bold text-rose-600">Gastos: -{relatedExpenses.reduce((acc, e) => acc + Number(e.amount), 0).toFixed(2)} €</span>
+                              </div>
+
+                              {relatedFiles.length > 0 && (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                                  {relatedFiles.map(file => (
+                                    <div key={file.id} className="bg-white p-2 rounded border border-slate-200 text-[10px] flex flex-col justify-between group">
+                                      <a href={file.file_url} target="_blank" rel="noopener noreferrer" className="font-bold text-indigo-600 truncate hover:underline block mb-1">
+                                        📄 {file.file_name}
+                                      </a>
+                                      <button onClick={() => handleDeleteAttachment(file.id)} className="text-rose-500 hover:text-rose-700 font-bold text-[9px] text-right mt-1">🗑 Eliminar</button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {relatedInvoices.length > 0 && (
+                            <div className="space-y-1.5 pt-1">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Facturas Generadas</span>
+                              {relatedInvoices.map(inv => (
+                                <div key={inv.id} className="flex justify-between items-center bg-indigo-50/50 p-2.5 rounded-lg border border-indigo-100 text-xs">
+                                  <div>
+                                    <span className="font-black text-indigo-900">{inv.code}</span>
+                                    <span className="text-[10px] text-slate-500 ml-2">({inv.status === 'cobrada' ? 'Cobrada' : 'Pendiente'})</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-black text-slate-800">{Number(inv.total).toFixed(2)} €</span>
+                                    {inv.pdf_url ? (
+                                        <a href={inv.pdf_url} target="_blank" rel="noopener noreferrer" className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 text-[9px] font-bold rounded">👁️ PDF</a>
+                                    ) : (
+                                        <button onClick={() => handleGeneratePdfAction(inv, 'download')} className="px-2 py-0.5 bg-white border border-slate-200 text-slate-700 text-[9px] font-bold rounded">⬇ PDF</button>
+                                    )}
+                                    <button onClick={() => handleDeleteDocument(inv)} className="text-rose-500 hover:text-rose-700 font-bold text-xs">✕</button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+            {crmTab === 'datos' && (
+              <div className="p-4 bg-white border-t border-slate-200 flex gap-3 shrink-0">
+                <button type="button" onClick={() => setShowCrmModal(false)} className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 transition text-slate-700 rounded-lg font-bold text-sm">Cancelar</button>
+                <button type="submit" form="crmFormId" className="flex-[2] py-3 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg font-black text-sm shadow-md">Guardar Ficha</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* MODAL CREAR CONDICIÓN DE CATÁLOGO (NUEVO) */}
       {showConditionCatalogModal && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto">
@@ -1736,7 +2018,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               <button onClick={() => setShowConditionCatalogModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
             </div>
             
-            {/* Formulario para añadir nueva */}
             <form onSubmit={handleSaveCatalogCondition} className="space-y-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
               <h4 className="font-bold text-indigo-700">Añadir Nueva Condición al Catálogo</h4>
               <div>
@@ -1750,7 +2031,6 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
               <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg font-bold shadow-md">Guardar en el catálogo</button>
             </form>
 
-            {/* Listado de guardadas */}
             <div className="space-y-2 mt-4 max-h-48 overflow-y-auto">
               {catalogConditions.length === 0 ? (
                 <p className="text-xs text-slate-400 text-center py-2 font-medium">Aún no has guardado ninguna condición.</p>
@@ -1772,22 +2052,75 @@ export default function DocumentsView({ user }: DocumentsViewProps) {
         </div>
       )}
 
-      {/* MODAL CREAR PARTIDA DE CATÁLOGO */}
+      {/* MODAL GESTIÓN DE CATÁLOGO DE PARTIDAS (MEJORADO CON CSV) */}
       {showCatalogItemModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4 animate-in zoom-in-95">
-            <h3 className="font-black text-base text-slate-800 border-b border-slate-100 pb-2">📦 Nueva Partida Catálogo</h3>
-            <form onSubmit={handleSaveCatalogItem} className="space-y-3 text-xs">
-              <div><label className="block font-bold text-slate-600 mb-1">Descripción</label><input type="text" required placeholder="Ej. Instalación..." value={newCatDesc} onChange={e => setNewCatDesc(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-300 font-bold focus:border-indigo-500 focus:outline-none transition" /></div>
-              <div>
-                <label className="block font-bold text-slate-600 mb-1">Precio Base</label>
-                <div className="relative"><input type="number" step="0.01" required placeholder="0.00" value={newCatPrice} onChange={e => setNewCatPrice(Number(e.target.value))} className="w-full p-2.5 rounded-lg border border-slate-300 font-black text-indigo-600 focus:border-indigo-500 focus:outline-none transition" /><span className="absolute right-3 top-2.5 font-black text-slate-400">€</span></div>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-2xl p-5 shadow-2xl space-y-4 animate-in zoom-in-95 my-auto max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2 shrink-0">
+              <h3 className="font-black text-lg text-slate-800">📦 Gestor del Catálogo de Partidas</h3>
+              <button onClick={() => setShowCatalogItemModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xl transition">✕</button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
+              {/* Formulario Manual */}
+              <form onSubmit={handleSaveCatalogItem} className="space-y-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <h4 className="font-bold text-indigo-700 text-sm">Crear Partida Manual</h4>
+                <div className="flex gap-2">
+                  <div className="w-1/3">
+                    <label className="block font-bold text-slate-600 mb-1">Referencia</label>
+                    <input type="text" placeholder="Ej. REF-01" value={newCatRef} onChange={e => setNewCatRef(e.target.value)} className="w-full p-2 rounded-lg border border-slate-300 focus:border-indigo-500 focus:outline-none transition" />
+                  </div>
+                  <div className="w-2/3">
+                    <label className="block font-bold text-slate-600 mb-1">Precio Base</label>
+                    <div className="relative"><input type="number" step="0.01" required placeholder="0.00" value={newCatPrice} onChange={e => setNewCatPrice(Number(e.target.value))} className="w-full p-2 rounded-lg border border-slate-300 font-black text-indigo-600 focus:border-indigo-500 focus:outline-none transition" /><span className="absolute right-3 top-2 font-black text-slate-400">€</span></div>
+                  </div>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 mb-1">Concepto / Descripción</label>
+                  <textarea required placeholder="Ej. Pintura plástica en color blanco..." rows={2} value={newCatDesc} onChange={e => setNewCatDesc(e.target.value)} className="w-full p-2 rounded-lg border border-slate-300 font-bold focus:border-indigo-500 focus:outline-none transition resize-none" />
+                </div>
+                <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg font-bold shadow-md">Guardar en Catálogo</button>
+              </form>
+
+              {/* Importador CSV */}
+              <div className="space-y-3 text-xs bg-slate-800 p-4 rounded-xl border border-slate-700 text-white flex flex-col justify-center">
+                <h4 className="font-bold text-indigo-300 text-sm">Importar desde Excel / CSV</h4>
+                <p className="text-slate-300 mb-2">Asegúrate de que tu archivo (.csv) tenga 3 columnas separadas por punto y coma (;) en este orden:</p>
+                <div className="bg-slate-900 p-2 rounded border border-slate-700 font-mono text-[10px] text-slate-400">
+                  Referencia ; Concepto ; Importe
+                </div>
+                <label className="w-full py-3 bg-white text-slate-900 text-center rounded-lg font-black shadow-md cursor-pointer hover:bg-slate-100 transition mt-2">
+                  Seleccionar Archivo CSV
+                  <input type="file" accept=".csv" className="hidden" onChange={handleFileUploadCSV} />
+                </label>
               </div>
-              <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => setShowCatalogItemModal(false)} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 transition rounded-lg font-bold text-slate-700">Cancelar</button>
-                <button type="submit" className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 transition text-white rounded-lg font-bold shadow-md">Guardar</button>
+            </div>
+
+            {/* Listado de partidas guardadas */}
+            <div className="flex-1 overflow-y-auto mt-4 border-t border-slate-100 pt-4">
+              <h4 className="font-bold text-slate-800 mb-3">Partidas Guardadas ({catalogItems.length})</h4>
+              <div className="space-y-2">
+                {catalogItems.length === 0 ? (
+                  <p className="text-sm text-slate-400 text-center py-4 font-medium border border-dashed border-slate-300 rounded-xl">No hay partidas en tu catálogo.</p>
+                ) : (
+                  catalogItems.map(item => (
+                    <div key={item.id} className="bg-white border border-slate-200 p-3 rounded-lg flex justify-between items-center gap-3 shadow-sm hover:border-indigo-300 transition">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          {item.reference && <span className="text-[9px] bg-slate-100 border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold">{item.reference}</span>}
+                          <span className="font-black text-indigo-600 whitespace-nowrap">{item.price} €</span>
+                        </div>
+                        <p className="text-xs font-bold text-slate-700 mt-1 truncate">{item.description}</p>
+                      </div>
+                      <button onClick={() => handleDeleteCatalogItem(item.id)} className="text-rose-500 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 w-8 h-8 rounded flex items-center justify-center transition shrink-0 font-bold">
+                        ✕
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
-            </form>
+            </div>
+
           </div>
         </div>
       )}
