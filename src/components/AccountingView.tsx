@@ -1,21 +1,17 @@
 // @ts-nocheck
 import React, { useState } from 'react';
-import { TrendingUp, TrendingDown, Landmark, Wallet, Plus, Receipt } from 'lucide-react';
 
 export default function AccountingView() {
-  // Estados para el modal de nuevo gasto
   const [isExpenseModalOpen, setExpenseModalOpen] = useState(false);
 
   // MOCK DATA: Aquí conectarías con tu Supabase (Presupuestos facturados y Gastos)
   const financialData = {
-    incomes: { base: 12500, vat: 2625, total: 15125 }, // Viene de Presupuestos aceptados/facturados
-    expenses: { base: 3200, vat: 672, total: 3872 }     // Viene de la tabla expenses
+    incomes: { base: 12500, vat: 2625, total: 15125 }, 
+    expenses: { base: 3200, vat: 672, total: 3872 }     
   };
 
-  // Cálculos Automáticos de Impuestos y Beneficios
   const ivaAPagar = financialData.incomes.vat - financialData.expenses.vat;
   const beneficioBruto = financialData.incomes.base - financialData.expenses.base;
-  // Estimación de IRPF / Impuesto Sociedades (Ejemplo: 20% sobre el beneficio bruto)
   const irpfEstimado = beneficioBruto * 0.20; 
   const beneficioNetoReal = beneficioBruto - irpfEstimado;
 
@@ -30,7 +26,7 @@ export default function AccountingView() {
           onClick={() => setExpenseModalOpen(true)}
           className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition"
         >
-          <Plus size={18} />
+          <span>➕</span>
           Anotar Gasto
         </button>
       </div>
@@ -39,7 +35,7 @@ export default function AccountingView() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-2 text-emerald-600 mb-2">
-            <TrendingUp size={18} />
+            <span>📈</span>
             <span className="text-sm font-semibold">Ingresos (Base)</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">{financialData.incomes.base.toFixed(2)} €</p>
@@ -48,7 +44,7 @@ export default function AccountingView() {
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-2 text-rose-500 mb-2">
-            <TrendingDown size={18} />
+            <span>📉</span>
             <span className="text-sm font-semibold">Gastos (Base)</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">{financialData.expenses.base.toFixed(2)} €</p>
@@ -57,7 +53,7 @@ export default function AccountingView() {
 
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center gap-2 text-amber-500 mb-2">
-            <Landmark size={18} />
+            <span>🏛️</span>
             <span className="text-sm font-semibold">Impuestos (IVA + IRPF)</span>
           </div>
           <p className="text-2xl font-bold text-slate-800">{(ivaAPagar + irpfEstimado).toFixed(2)} €</p>
@@ -69,7 +65,7 @@ export default function AccountingView() {
 
         <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 shadow-sm">
           <div className="flex items-center gap-2 text-indigo-700 mb-2">
-            <Wallet size={18} />
+            <span>👛</span>
             <span className="text-sm font-semibold">Beneficio Real</span>
           </div>
           <p className="text-2xl font-black text-indigo-700">{beneficioNetoReal.toFixed(2)} €</p>
@@ -79,15 +75,13 @@ export default function AccountingView() {
 
       {/* LISTADOS: GASTOS RECIENTES Y FACTURAS */}
       <div className="grid md:grid-cols-2 gap-6 mt-6">
-        {/* Desglose de Gastos */}
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50">
             <h3 className="font-semibold text-slate-700 flex items-center gap-2">
-              <Receipt size={18} /> Últimos Gastos
+              <span>🧾</span> Últimos Gastos
             </h3>
           </div>
           <div className="divide-y divide-slate-100">
-            {/* Ejemplo estático de una fila de gasto */}
             <div className="p-4 flex justify-between items-center hover:bg-slate-50">
               <div>
                 <p className="text-sm font-medium text-slate-800">Gasolina Furgoneta</p>
@@ -111,11 +105,10 @@ export default function AccountingView() {
           </div>
         </div>
 
-        {/* Desglose de Pagos */}
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="p-4 border-b border-slate-100 bg-slate-50">
             <h3 className="font-semibold text-slate-700 flex items-center gap-2">
-              <TrendingUp size={18} /> Últimos Cobros (Presupuestos)
+              <span>📈</span> Últimos Cobros (Presupuestos)
             </h3>
           </div>
           <div className="divide-y divide-slate-100">
