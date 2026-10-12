@@ -52,6 +52,13 @@ export default function ModulesView({ onOpenModule, userPlan = 'free' }: Modules
         
         {/* MÓDULOS PROTEGIDOS (PAGO) */}
         <ModuleCard 
+          title="Contabilidad" 
+          icon="📊" 
+          isLocked={!isPremium}
+          onClick={() => handleProtectedClick('accounting')} 
+        />
+
+        <ModuleCard 
           title="Presup. y Facturas" 
           icon="💶" 
           isLocked={!isPremium}
@@ -76,7 +83,7 @@ export default function ModulesView({ onOpenModule, userPlan = 'free' }: Modules
           title="Control de Rutas" 
           icon="📍" 
           isLocked={!isPremium}
-          onClick={() => handleProtectedClick('tracking')} // <-- CORRECCIÓN APLICADA AQUÍ ('tracking')
+          onClick={() => handleProtectedClick('tracking')}
         />
 
         <ModuleCard 
